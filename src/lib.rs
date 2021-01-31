@@ -413,11 +413,11 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn metaphone() {
         run_test(|| {
-            // let query = "~smith"
-            todo!()
+            let expected = todo!();
+            let actual = parse("~smith");
+            // assert_eq!(expected, actual);
         })
     }
 
@@ -783,11 +783,15 @@ mod tests {
             let expected = Ok((
                 "",
                 Query::or(vec![
-                    Term::new("active").set_field("status").into(),
-                    Term::new("pending").set_field("status").into(),
-                    Term::new("full").set_field("title").set_boost(2.0).into(),
-                    Term::new("text").set_field("title").set_boost(2.0).into(),
-                    Term::new("search").set_field("title").set_boost(2.0).into(),
+                    Query::or(vec![
+                        Term::new("active").set_field("status").into(),
+                        Term::new("pending").set_field("status").into(),
+                    ]),
+                    Query::or(vec![
+                        Term::new("full").set_field("title").set_boost(2.0).into(),
+                        Term::new("text").set_field("title").set_boost(2.0).into(),
+                        Term::new("search").set_field("title").set_boost(2.0).into(),
+                    ]),
                 ]),
             ));
             let actual = parse("status:(active OR pending) title:(full text search)^2");

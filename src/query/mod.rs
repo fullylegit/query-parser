@@ -83,8 +83,9 @@ impl<'a> Query<'a> {
             Query::Term(term) => Query::Term(term.set_field(field)),
             Query::Regex(regex) => Query::Regex(regex.set_field(field)),
             Query::Phrase(phrase) => Query::Phrase(phrase.set_field(field)),
-            // or
-            // and
+            Query::Or(or) => or.set_field(field).into(),
+            Query::And(and) => and.set_field(field).into(),
+            // TODO: add all the other types
             _ => self,
         }
     }
@@ -239,6 +240,16 @@ impl<'a> Or<'a> {
                 .collect(),
         }
     }
+
+    fn set_field(self, field: &'a str) -> Self {
+        Self {
+            queries: self
+                .queries
+                .into_iter()
+                .map(|q| q.set_field(field))
+                .collect(),
+        }
+    }
 }
 
 impl<'a> From<Vec<Query<'a>>> for Or<'a> {
@@ -264,6 +275,16 @@ impl<'a> And<'a> {
                 .queries
                 .into_iter()
                 .map(|q| q.set_boost(boost))
+                .collect(),
+        }
+    }
+
+    fn set_field(self, field: &'a str) -> Self {
+        Self {
+            queries: self
+                .queries
+                .into_iter()
+                .map(|q| q.set_field(field))
                 .collect(),
         }
     }
