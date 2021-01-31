@@ -686,10 +686,18 @@ mod tests {
                         Query::or(vec![Term::new("quick").into(), Term::new("brown").into()]),
                     ]),
                 ]),
-                Term::new("fox").into(),
+                Query::or(vec![
+                    Query::or(vec![
+                        Query::or(vec![Term::new("fox").into(), Term::new("elephant").into()]),
+                        Term::new("peanut").into(),
+                    ]),
+                    Term::new("banana").into(),
+                ]),
             ]),
         ));
-        let actual = parse("(hippo OR (eggs OR (quick OR brown))) AND fox");
+        let actual = parse(
+            "(hippo OR (eggs OR (quick OR brown))) AND (((fox OR elephant) OR peanut) OR banana)",
+        );
         assert_eq!(expected, actual);
     }
 }
