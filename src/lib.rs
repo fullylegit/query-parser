@@ -33,6 +33,7 @@ fn phrase_inner(input: &str) -> IResult<&str, &str> {
     delimited(char('"'), escaped_with_spaces, char('"'))(input)
 }
 
+// TODO: refactor the common parts of `adjacent` and `within` into a single parser
 fn within(input: &str) -> IResult<&str, Query> {
     let (input, _) = eat_whitespace(input)?;
     // TODO: handle multiple spaces around `WITHIN`
@@ -49,7 +50,6 @@ fn within(input: &str) -> IResult<&str, Query> {
         _ => {
             // unquoted phrase - only supports WITHIN, not ~
             let (input, phrase) = take_until(" WITHIN")(input)?;
-            println!("input: {:?}\nphrase: {:?}", input, phrase);
             let (input, distance) =
                 preceded(tag(" WITHIN "), map_res(digit1, |s: &str| s.parse::<u64>()))(input)?;
             (input, phrase, distance)
@@ -59,14 +59,28 @@ fn within(input: &str) -> IResult<&str, Query> {
     Ok((input, Query::near(phrase, distance, false)))
 }
 
+// TODO: refactor the common parts of `adjacent` and `within` into a single parser
 fn adjacent(input: &str) -> IResult<&str, Query> {
     let (input, _) = eat_whitespace(input)?;
     // TODO: handle multiple spaces around `ADJ`
-    let (input, (phrase, distance)) = separated_pair(
-        phrase_inner,
-        tag(" ADJ "),
-        map_res(digit1, |s: &str| s.parse::<u64>()),
-    )(input)?;
+    let (input, phrase, distance) = match input.chars().next() {
+        Some('"') => {
+            // quoted phrase
+            let (input, (phrase, distance)) = separated_pair(
+                phrase_inner,
+                tag(" ADJ "),
+                map_res(digit1, |s: &str| s.parse::<u64>()),
+            )(input)?;
+            (input, phrase, distance)
+        }
+        _ => {
+            // unquoted phrase
+            let (input, phrase) = take_until(" ADJ")(input)?;
+            let (input, distance) =
+                preceded(tag(" ADJ "), map_res(digit1, |s: &str| s.parse::<u64>()))(input)?;
+            (input, phrase, distance)
+        }
+    };
     Ok((input, Query::near(phrase, distance, true)))
 }
 
