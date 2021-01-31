@@ -95,6 +95,7 @@ impl<'a> Query<'a> {
             Query::Or(or) => or.set_boost(boost).into(),
             Query::And(and) => and.set_boost(boost).into(),
             Query::Term(term) => term.set_boost(boost).into(),
+            Query::Phrase(phrase) => phrase.set_boost(boost).into(),
             // TODO: add all the other types
             _ => self,
         }

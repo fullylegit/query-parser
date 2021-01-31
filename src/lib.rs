@@ -136,13 +136,6 @@ fn group(input: &str) -> IResult<&str, Query> {
     trace!("group: {:?}", input);
     let (input, query) = delimited(char('('), parse, char(')'))(input)?;
     trace!("input: {:?}\nbody: {:?}", input, query);
-    // group boost
-    let (input, boost) = boost(input)?;
-    trace!("group boost: {:?}", boost);
-    let query = match boost {
-        Some(boost) => query.set_boost(boost),
-        None => query,
-    };
     Ok((input, query))
 }
 
@@ -202,16 +195,31 @@ pub fn parse(input: &str) -> IResult<&str, Query> {
             match queries.pop() {
                 Some(prev_query) => queries.push(Query::or(vec![prev_query, query])),
                 None => {
+                    // TODO: return a string: "Unexpected OR, expecting query"
                     return Err(nom::Err::Error(nom::error::make_error(
                         input,
                         nom::error::ErrorKind::Tag,
-                    )))
+                    )));
                 }
             }
             input
         } else if char::<_, ()>(')')(input).is_ok() {
             // end of a group, return all the queries. don't advance input
             break;
+        } else if let Ok((input, Some(boost))) = boost(input) {
+            trace!("input: {:?} boost: {:?}", input, boost);
+            // boost
+            match queries.pop() {
+                Some(prev_query) => queries.push(prev_query.set_boost(boost)),
+                None => {
+                    // TODO: return a string: "Unexpected boost, expecting query"
+                    return Err(nom::Err::Error(nom::error::make_error(
+                        input,
+                        nom::error::ErrorKind::Tag,
+                    )));
+                }
+            }
+            input
         } else {
             let (i, query) = query(input)?;
             queries.push(query);
