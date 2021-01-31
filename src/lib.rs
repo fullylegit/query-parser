@@ -21,6 +21,16 @@ fn eat_whitespace(input: &str) -> IResult<&str, ()> {
     Ok((input, ()))
 }
 
+fn boost(input: &str) -> IResult<&str, Option<f64>> {
+    map_res::<_, _, _, _, <f64 as std::str::FromStr>::Err, _, _>(
+        opt(preceded(char('^'), digit1)),
+        |res: Option<&str>| match res {
+            Some(num) => Ok(Some(num.parse::<f64>()?)),
+            None => Ok(None),
+        },
+    )(input)
+}
+
 /// Matches any characters that can be escaped by `\`
 fn escapable(input: &str) -> IResult<&str, char> {
     one_of("\".*")(input)
@@ -96,13 +106,7 @@ fn phrase(input: &str) -> IResult<&str, Phrase> {
 fn term(input: &str) -> IResult<&str, Term> {
     let (input, _) = eat_whitespace(input)?;
     let (input, word) = escaped_without_spaces(input)?;
-    let (input, boost) = map_res::<_, _, _, _, <f64 as std::str::FromStr>::Err, _, _>(
-        opt(preceded(char('^'), digit1)),
-        |res: Option<&str>| match res {
-            Some(num) => Ok(Some(num.parse::<f64>()?)),
-            None => Ok(None),
-        },
-    )(input)?;
+    let (input, maybe_boost) = boost(input)?;
     let (input, fuzziness) = map_res::<_, _, _, _, <u64 as std::str::FromStr>::Err, _, _>(
         opt(preceded(char('~'), opt(digit1))),
         |res: Option<Option<&str>>| match res {
@@ -111,15 +115,9 @@ fn term(input: &str) -> IResult<&str, Term> {
             None => Ok(None),
         },
     )(input)?;
-    let (input, boost) = match boost {
+    let (input, boost) = match maybe_boost {
         Some(boost) => (input, Some(boost)),
-        None => map_res::<_, _, _, _, <f64 as std::str::FromStr>::Err, _, _>(
-            opt(preceded(char('^'), digit1)),
-            |res: Option<&str>| match res {
-                Some(num) => Ok(Some(num.parse::<f64>()?)),
-                None => Ok(None),
-            },
-        )(input)?,
+        None => boost(input)?,
     };
     Ok((input, {
         let mut term = Term::new(word);
@@ -139,13 +137,7 @@ fn group(input: &str) -> IResult<&str, Query> {
     let (input, query) = delimited(char('('), parse, char(')'))(input)?;
     trace!("input: {:?}\nbody: {:?}", input, query);
     // group boost
-    let (input, boost) = map_res::<_, _, _, _, <f64 as std::str::FromStr>::Err, _, _>(
-        opt(preceded(char('^'), digit1)),
-        |res: Option<&str>| match res {
-            Some(num) => Ok(Some(num.parse::<f64>()?)),
-            None => Ok(None),
-        },
-    )(input)?;
+    let (input, boost) = boost(input)?;
     trace!("group boost: {:?}", boost);
     let query = match boost {
         Some(boost) => query.set_boost(boost),
