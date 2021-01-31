@@ -1,12 +1,14 @@
 pub mod query;
 use query::{And, Exists, Near, Not, Or, Phrase, Query, Range, Regex, Term};
 
-use nom::branch::alt;
-use nom::bytes::complete::{escaped, tag, take_until};
-use nom::character::complete::{alphanumeric1, char, digit1, multispace0, none_of, one_of};
+use nom::bytes::complete::{escaped, tag, take_until, take_while};
+use nom::character::complete::{
+    alphanumeric1, anychar, char, digit1, multispace0, none_of, one_of, satisfy,
+};
 use nom::combinator::{map, map_res, opt};
 use nom::sequence::{delimited, pair, preceded, separated_pair, terminated};
 use nom::IResult;
+use nom::{branch::alt, error};
 
 // TODO: move to mod.rs? make configurable?
 const DEFAULT_FUZZINESS: u64 = 2;
@@ -22,11 +24,11 @@ fn escapable(input: &str) -> IResult<&str, char> {
 }
 
 fn escaped_without_spaces(input: &str) -> IResult<&str, &str> {
-    escaped(none_of("\\\" ^~"), '\\', escapable)(input)
+    escaped(none_of("\\\" ^~()[]{}"), '\\', escapable)(input)
 }
 
 fn escaped_with_spaces(input: &str) -> IResult<&str, &str> {
-    escaped(none_of("\\\"^~"), '\\', escapable)(input)
+    escaped(none_of("\\\"^~()[]{}"), '\\', escapable)(input)
 }
 
 fn phrase_inner(input: &str) -> IResult<&str, &str> {
@@ -128,6 +130,14 @@ fn term(input: &str) -> IResult<&str, Term> {
     }))
 }
 
+fn group(input: &str) -> IResult<&str, Query> {
+    let (input, _) = eat_whitespace(input)?;
+    println!("group: {:?}", input);
+    let (input, query) = delimited(char('('), parse, char(')'))(input)?;
+    println!("input: {:?}\nbody: {:?}", input, query);
+    Ok((input, query))
+}
+
 fn query(input: &str) -> IResult<&str, Query> {
     let (input, _) = eat_whitespace(input)?;
     // attempt to parse a field:query pair
@@ -135,6 +145,7 @@ fn query(input: &str) -> IResult<&str, Query> {
         alphanumeric1,
         tag(":"),
         alt((
+            group,
             within,
             adjacent,
             map(term, From::from),
@@ -149,6 +160,7 @@ fn query(input: &str) -> IResult<&str, Query> {
         }
         // input wasn't a field:query pair, non-field parsing
         Err(_) => alt((
+            group,
             within,
             adjacent,
             map(term, From::from),
@@ -158,11 +170,44 @@ fn query(input: &str) -> IResult<&str, Query> {
 }
 
 pub fn parse(input: &str) -> IResult<&str, Query> {
+    println!("parse: {:?}", input);
     let mut queries = vec![];
     let mut input = input;
     while !input.is_empty() {
-        let (i, query) = query(input)?;
-        queries.push(query);
+        println!("queries: {:?}", queries);
+        let i = if let Ok((input, _)) = tag::<_, _, ()>("AND ")(input) {
+            println!("got AND: {:?}", input);
+            let (input, query) = query(input)?;
+            match queries.pop() {
+                Some(prev_query) => queries.push(Query::and(vec![prev_query, query])),
+                None => {
+                    return Err(nom::Err::Error(nom::error::make_error(
+                        input,
+                        nom::error::ErrorKind::Tag,
+                    )))
+                }
+            }
+            input
+        } else if let Ok((input, _)) = tag::<_, _, ()>("OR ")(input) {
+            println!("got OR: {:?}", input);
+            let (input, query) = query(input)?;
+            match queries.pop() {
+                Some(prev_query) => queries.push(Query::or(vec![prev_query, query])),
+                None => {
+                    return Err(nom::Err::Error(nom::error::make_error(
+                        input,
+                        nom::error::ErrorKind::Tag,
+                    )))
+                }
+            }
+            input
+        } else if char::<_, ()>(')')(input).is_ok() {
+            break;
+        } else {
+            let (i, query) = query(input)?;
+            queries.push(query);
+            i
+        };
         let (i, _whitespace) = multispace0(i)?;
         input = i;
     }
@@ -628,4 +673,23 @@ mod tests {
     }
 
     // es docs reserved characters: + - = && || > < ! ( ) { } [ ] ^ " ~ * ? : \ /
+
+    #[test]
+    fn nested_groups() {
+        let expected = Ok((
+            "",
+            Query::and(vec![
+                Query::or(vec![
+                    Term::new("hippo").into(),
+                    Query::or(vec![
+                        Term::new("eggs").into(),
+                        Query::or(vec![Term::new("quick").into(), Term::new("brown").into()]),
+                    ]),
+                ]),
+                Term::new("fox").into(),
+            ]),
+        ));
+        let actual = parse("(hippo OR (eggs OR (quick OR brown))) AND fox");
+        assert_eq!(expected, actual);
+    }
 }
