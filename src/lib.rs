@@ -2,10 +2,10 @@ pub mod query;
 use query::{And, Exists, Near, Not, Or, Phrase, Query, Range, Regex, Term};
 
 use nom::branch::alt;
-use nom::bytes::complete::{escaped, tag};
+use nom::bytes::complete::{escaped, tag, take_until};
 use nom::character::complete::{alphanumeric1, char, digit1, multispace0, none_of, one_of};
 use nom::combinator::{map, map_res, opt};
-use nom::sequence::{delimited, preceded, separated_pair};
+use nom::sequence::{delimited, pair, preceded, separated_pair, terminated};
 use nom::IResult;
 
 // TODO: move to mod.rs? make configurable?
@@ -36,11 +36,26 @@ fn phrase_inner(input: &str) -> IResult<&str, &str> {
 fn within(input: &str) -> IResult<&str, Query> {
     let (input, _) = eat_whitespace(input)?;
     // TODO: handle multiple spaces around `WITHIN`
-    let (input, (phrase, distance)) = separated_pair(
-        phrase_inner,
-        alt((tag(" WITHIN "), tag("~"))),
-        map_res(digit1, |s: &str| s.parse::<u64>()),
-    )(input)?;
+    let (input, phrase, distance) = match input.chars().next() {
+        Some('"') => {
+            // quoted phrase
+            let (input, (phrase, distance)) = separated_pair(
+                phrase_inner,
+                alt((tag(" WITHIN "), tag("~"))),
+                map_res(digit1, |s: &str| s.parse::<u64>()),
+            )(input)?;
+            (input, phrase, distance)
+        }
+        _ => {
+            // unquoted phrase - only supports WITHIN, not ~
+            let (input, phrase) = take_until(" WITHIN")(input)?;
+            println!("input: {:?}\nphrase: {:?}", input, phrase);
+            let (input, distance) =
+                preceded(tag(" WITHIN "), map_res(digit1, |s: &str| s.parse::<u64>()))(input)?;
+            (input, phrase, distance)
+        }
+    };
+
     Ok((input, Query::near(phrase, distance, false)))
 }
 
