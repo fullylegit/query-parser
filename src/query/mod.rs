@@ -83,6 +83,18 @@ impl<'a> Query<'a> {
             Query::Term(term) => Query::Term(term.set_field(field)),
             Query::Regex(regex) => Query::Regex(regex.set_field(field)),
             Query::Phrase(phrase) => Query::Phrase(phrase.set_field(field)),
+            // or
+            // and
+            _ => self,
+        }
+    }
+
+    pub(crate) fn set_boost(self, boost: f64) -> Self {
+        match self {
+            Query::Or(or) => or.set_boost(boost).into(),
+            Query::And(and) => and.set_boost(boost).into(),
+            Query::Term(term) => term.set_boost(boost).into(),
+            // TODO: add all the other types
             _ => self,
         }
     }
@@ -217,6 +229,16 @@ impl<'a> Or<'a> {
     fn new(queries: Vec<Query<'a>>) -> Self {
         Self { queries }
     }
+
+    fn set_boost(self, boost: f64) -> Self {
+        Self {
+            queries: self
+                .queries
+                .into_iter()
+                .map(|q| q.set_boost(boost))
+                .collect(),
+        }
+    }
 }
 
 impl<'a> From<Vec<Query<'a>>> for Or<'a> {
@@ -234,6 +256,16 @@ pub struct And<'a> {
 impl<'a> And<'a> {
     fn new(queries: Vec<Query<'a>>) -> Self {
         Self { queries }
+    }
+
+    fn set_boost(self, boost: f64) -> Self {
+        Self {
+            queries: self
+                .queries
+                .into_iter()
+                .map(|q| q.set_boost(boost))
+                .collect(),
+        }
     }
 }
 

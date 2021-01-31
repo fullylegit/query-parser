@@ -135,9 +135,22 @@ fn term(input: &str) -> IResult<&str, Term> {
 
 fn group(input: &str) -> IResult<&str, Query> {
     let (input, _) = eat_whitespace(input)?;
-    println!("group: {:?}", input);
+    trace!("group: {:?}", input);
     let (input, query) = delimited(char('('), parse, char(')'))(input)?;
-    println!("input: {:?}\nbody: {:?}", input, query);
+    trace!("input: {:?}\nbody: {:?}", input, query);
+    // group boost
+    let (input, boost) = map_res::<_, _, _, _, <f64 as std::str::FromStr>::Err, _, _>(
+        opt(preceded(char('^'), digit1)),
+        |res: Option<&str>| match res {
+            Some(num) => Ok(Some(num.parse::<f64>()?)),
+            None => Ok(None),
+        },
+    )(input)?;
+    trace!("group boost: {:?}", boost);
+    let query = match boost {
+        Some(boost) => query.set_boost(boost),
+        None => query,
+    };
     Ok((input, query))
 }
 
@@ -173,13 +186,13 @@ fn query(input: &str) -> IResult<&str, Query> {
 }
 
 pub fn parse(input: &str) -> IResult<&str, Query> {
-    println!("parse: {:?}", input);
+    trace!("parse: {:?}", input);
     let mut queries = vec![];
     let mut input = input;
     while !input.is_empty() {
-        println!("queries: {:?}", queries);
+        trace!("queries: {:?}", queries);
         let i = if let Ok((input, _)) = tag::<_, _, ()>("AND ")(input) {
-            println!("got AND: {:?}", input);
+            trace!("got AND: {:?}", input);
             let (input, query) = query(input)?;
             match queries.pop() {
                 Some(prev_query) => queries.push(Query::and(vec![prev_query, query])),
@@ -192,7 +205,7 @@ pub fn parse(input: &str) -> IResult<&str, Query> {
             }
             input
         } else if let Ok((input, _)) = tag::<_, _, ()>("OR ")(input) {
-            println!("got OR: {:?}", input);
+            trace!("got OR: {:?}", input);
             let (input, query) = query(input)?;
             match queries.pop() {
                 Some(prev_query) => queries.push(Query::or(vec![prev_query, query])),
@@ -205,6 +218,7 @@ pub fn parse(input: &str) -> IResult<&str, Query> {
             }
             input
         } else if char::<_, ()>(')')(input).is_ok() {
+            // end of a group, return all the queries. don't advance input
             break;
         } else {
             let (i, query) = query(input)?;
