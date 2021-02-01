@@ -31,6 +31,17 @@ fn boost(input: &str) -> IResult<&str, Option<f64>> {
     )(input)
 }
 
+fn fuzziness(input: &str) -> IResult<&str, Option<u64>> {
+    map_res::<_, _, _, _, <u64 as std::str::FromStr>::Err, _, _>(
+        opt(preceded(char('~'), opt(digit1))),
+        |res: Option<Option<&str>>| match res {
+            Some(None) => Ok(Some(DEFAULT_FUZZINESS)),
+            Some(Some(num)) => Ok(Some(num.parse::<u64>()?)),
+            None => Ok(None),
+        },
+    )(input)
+}
+
 /// Matches any characters that can be escaped by `\`
 fn escapable(input: &str) -> IResult<&str, char> {
     one_of("\".*")(input)
@@ -107,14 +118,7 @@ fn term(input: &str) -> IResult<&str, Term> {
     let (input, _) = eat_whitespace(input)?;
     let (input, word) = escaped_without_spaces(input)?;
     let (input, maybe_boost) = boost(input)?;
-    let (input, fuzziness) = map_res::<_, _, _, _, <u64 as std::str::FromStr>::Err, _, _>(
-        opt(preceded(char('~'), opt(digit1))),
-        |res: Option<Option<&str>>| match res {
-            Some(None) => Ok(Some(DEFAULT_FUZZINESS)),
-            Some(Some(num)) => Ok(Some(num.parse::<u64>()?)),
-            None => Ok(None),
-        },
-    )(input)?;
+    let (input, fuzziness) = fuzziness(input)?;
     let (input, boost) = match maybe_boost {
         Some(boost) => (input, Some(boost)),
         None => boost(input)?,
