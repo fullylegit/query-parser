@@ -75,6 +75,11 @@ fn phrase_inner(input: &str) -> IResult<&str, &str> {
     delimited(char('"'), escaped_with_spaces, char('"'))(input)
 }
 
+fn regex(input: &str) -> IResult<&str, Query> {
+    let (input, regex) = delimited(char('/'), take_until("/"), char('/'))(input)?;
+    Ok((input, Regex::new(regex).into()))
+}
+
 // TODO: refactor the common parts of `adjacent` and `within` into a single parser
 fn within(input: &str) -> IResult<&str, Query> {
     let (input, _) = eat_whitespace(input)?;
@@ -169,6 +174,7 @@ fn query(input: &str) -> IResult<&str, Query> {
             group,
             within,
             adjacent,
+            map(regex, From::from),
             map(term, From::from),
             map(phrase, From::from),
         )),
@@ -189,6 +195,7 @@ fn query(input: &str) -> IResult<&str, Query> {
             group,
             within,
             adjacent,
+            map(regex, From::from),
             map(term, From::from),
             map(phrase, From::from),
         ))(input),
