@@ -4,11 +4,11 @@ pub mod query;
 use query::{And, Exists, Near, Not, Or, Phrase, Query, Range, Regex, Term};
 
 use log::trace;
-use nom::bytes::complete::{escaped, tag, take_until, take_while};
+use nom::bytes::complete::{escaped, escaped_transform, tag, take_until, take_while};
 use nom::character::complete::{
     alphanumeric1, anychar, char, digit1, multispace0, none_of, one_of, satisfy,
 };
-use nom::combinator::{map, map_res, opt};
+use nom::combinator::{map, map_res, opt, value};
 use nom::sequence::{delimited, pair, preceded, separated_pair, terminated};
 use nom::IResult;
 use nom::{branch::alt, error};
@@ -45,15 +45,30 @@ fn fuzziness(input: &str) -> IResult<&str, Option<u64>> {
 // es docs reserved characters: + - = && || > < ! ( ) { } [ ] ^ " ~ * ? : \ /
 /// Matches any characters that can be escaped by `\`
 fn escapable(input: &str) -> IResult<&str, char> {
-    one_of("\".*()[]{}^~ :")(input)
+    one_of("\"()[]{}^~ :*")(input)
+}
+
+#[rustfmt::skip]
+fn escapable_transform(input: &str) -> IResult<&str, &str> {
+    trace!("escapable_transform: {:?}", input);
+    alt((
+        value("*", tag("*")),
+        value(" ", tag(" ")),
+    ))(input)
 }
 
 fn escaped_without_spaces(input: &str) -> IResult<&str, &str> {
-    escaped(none_of("\\\" ^~()[]{}:"), '\\', escapable)(input)
+    // TODO: change this to escaped_transform
+    escaped(none_of("\\\"^~()[]{}: "), '\\', escapable)(input)
 }
 
 fn escaped_with_spaces(input: &str) -> IResult<&str, &str> {
+    // TODO: change this to escaped_transform
     escaped(none_of("\\\"^~()[]{}:"), '\\', escapable)(input)
+}
+
+fn escaped_field_name(input: &str) -> IResult<&str, String> {
+    escaped_transform(none_of("\\\"^~()[]{}:*"), '\\', escapable_transform)(input)
 }
 
 fn phrase_inner(input: &str) -> IResult<&str, &str> {
@@ -147,8 +162,8 @@ fn group(input: &str) -> IResult<&str, Query> {
 fn query(input: &str) -> IResult<&str, Query> {
     let (input, _) = eat_whitespace(input)?;
     // attempt to parse a field:query pair
-    let result: IResult<&str, (&str, Query)> = separated_pair(
-        escaped_without_spaces,
+    let result: IResult<&str, (String, Query)> = separated_pair(
+        escaped_field_name,
         tag(":"),
         alt((
             group,
@@ -311,7 +326,7 @@ mod tests {
     #[test]
     fn field_term() {
         run_test(|| {
-            let expected = Ok(("", Query::Term(Term::new("word").set_field("eggs"))));
+            let expected = Ok(("", Query::Term(Term::new("word").set_field("eggs".into()))));
             let actual = parse("eggs:word");
             assert_eq!(expected, actual);
             let actual = parse("eggs: word");
@@ -437,7 +452,10 @@ mod tests {
     #[test]
     fn es_docs_field_term() {
         run_test(|| {
-            let expected = Ok(("", Query::Term(Term::new("active").set_field("status"))));
+            let expected = Ok((
+                "",
+                Query::Term(Term::new("active").set_field("status".into())),
+            ));
             let actual = parse("status:active");
             assert_eq!(expected, actual);
         })
@@ -449,8 +467,8 @@ mod tests {
             let expected = Ok((
                 "",
                 Query::or(vec![
-                    Term::new("quick").set_field("title").into(),
-                    Term::new("brown").set_field("title").into(),
+                    Term::new("quick").set_field("title".into()).into(),
+                    Term::new("brown").set_field("title".into()).into(),
                 ]),
             ));
             let actual = parse("title:(quick OR brown)");
@@ -463,7 +481,7 @@ mod tests {
         run_test(|| {
             let expected = Ok((
                 "",
-                Query::Phrase(Phrase::new("John Smith").set_field("author")),
+                Query::Phrase(Phrase::new("John Smith").set_field("author".into())),
             ));
             let actual = parse(r#"author:"John Smith""#);
             assert_eq!(expected, actual);
@@ -473,7 +491,10 @@ mod tests {
     #[test]
     fn es_docs_field_escaped_space() {
         run_test(|| {
-            let expected = Ok(("", Query::Term(Term::new("Alice").set_field("first name"))));
+            let expected = Ok((
+                "",
+                Query::Term(Term::new("Alice").set_field("first name".into())),
+            ));
             let actual = parse(r#"first\ name:Alice"#);
             assert_eq!(expected, actual);
         })
@@ -485,8 +506,8 @@ mod tests {
             let expected = Ok((
                 "",
                 Query::or(vec![
-                    Term::new("quick").set_field("book.*").into(),
-                    Term::new("brown").set_field("book.*").into(),
+                    Term::new("quick").set_field("book.*".into()).into(),
+                    Term::new("brown").set_field("book.*".into()).into(),
                 ]),
             ));
             let actual = parse(r#"book.\*:(quick OR brown)"#);
@@ -520,7 +541,7 @@ mod tests {
         run_test(|| {
             let expected = Ok((
                 "",
-                Query::Regex(Regex::new("joh?n(ath[oa]n)").set_field("name")),
+                Query::Regex(Regex::new("joh?n(ath[oa]n)").set_field("name".into())),
             ));
             let actual = parse(r#"name:/joh?n(ath[oa]n)/"#);
             assert_eq!(expected, actual);
@@ -794,13 +815,22 @@ mod tests {
                 "",
                 Query::or(vec![
                     Query::or(vec![
-                        Term::new("active").set_field("status").into(),
-                        Term::new("pending").set_field("status").into(),
+                        Term::new("active").set_field("status".into()).into(),
+                        Term::new("pending").set_field("status".into()).into(),
                     ]),
                     Query::or(vec![
-                        Term::new("full").set_field("title").set_boost(2.0).into(),
-                        Term::new("text").set_field("title").set_boost(2.0).into(),
-                        Term::new("search").set_field("title").set_boost(2.0).into(),
+                        Term::new("full")
+                            .set_field("title".into())
+                            .set_boost(2.0)
+                            .into(),
+                        Term::new("text")
+                            .set_field("title".into())
+                            .set_boost(2.0)
+                            .into(),
+                        Term::new("search")
+                            .set_field("title".into())
+                            .set_boost(2.0)
+                            .into(),
                     ]),
                 ]),
             ));

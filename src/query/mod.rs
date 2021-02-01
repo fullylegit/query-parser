@@ -78,7 +78,7 @@ impl<'a> From<Range<'a>> for Query<'a> {
 
 impl<'a> Query<'a> {
     // TODO: remove/refactor somehow
-    pub(crate) fn set_field(self, field: &'a str) -> Self {
+    pub(crate) fn set_field(self, field: String) -> Self {
         match self {
             Query::Term(term) => Query::Term(term.set_field(field)),
             Query::Regex(regex) => Query::Regex(regex.set_field(field)),
@@ -133,7 +133,7 @@ pub struct Term<'a> {
     term: &'a str,
     boost: f64,
     fuzziness: u64,
-    field: Option<&'a str>,
+    field: Option<String>,
 }
 
 impl<'a> Term<'a> {
@@ -154,7 +154,7 @@ impl<'a> Term<'a> {
         Self { fuzziness, ..self }
     }
 
-    pub(crate) fn set_field(self, field: &'a str) -> Self {
+    pub(crate) fn set_field(self, field: String) -> Self {
         Self {
             field: Some(field),
             ..self
@@ -179,7 +179,7 @@ impl<'a> Term<'a> {
 pub struct Phrase<'a> {
     phrase: &'a str,
     boost: f64,
-    field: Option<&'a str>,
+    field: Option<String>,
 }
 
 impl<'a> Phrase<'a> {
@@ -191,7 +191,7 @@ impl<'a> Phrase<'a> {
         }
     }
 
-    pub(crate) fn set_field(self, field: &'a str) -> Self {
+    pub(crate) fn set_field(self, field: String) -> Self {
         Self {
             field: Some(field),
             ..self
@@ -242,12 +242,12 @@ impl<'a> Or<'a> {
         }
     }
 
-    fn set_field(self, field: &'a str) -> Self {
+    fn set_field(self, field: String) -> Self {
         Self {
             queries: self
                 .queries
                 .into_iter()
-                .map(|q| q.set_field(field))
+                .map(|q| q.set_field(field.clone()))
                 .collect(),
         }
     }
@@ -280,12 +280,12 @@ impl<'a> And<'a> {
         }
     }
 
-    fn set_field(self, field: &'a str) -> Self {
+    fn set_field(self, field: String) -> Self {
         Self {
             queries: self
                 .queries
                 .into_iter()
-                .map(|q| q.set_field(field))
+                .map(|q| q.set_field(field.clone()))
                 .collect(),
         }
     }
@@ -327,7 +327,7 @@ impl<'a> Exists<'a> {
 #[derive(Debug, PartialEq)]
 pub struct Regex<'a> {
     regex: &'a str,
-    field: Option<&'a str>,
+    field: Option<String>,
 }
 
 impl<'a> Regex<'a> {
@@ -335,7 +335,7 @@ impl<'a> Regex<'a> {
         Self { regex, field: None }
     }
 
-    pub(crate) fn set_field(self, field: &'a str) -> Self {
+    pub(crate) fn set_field(self, field: String) -> Self {
         Self {
             field: Some(field),
             ..self
