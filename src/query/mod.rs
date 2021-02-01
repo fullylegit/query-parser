@@ -19,7 +19,8 @@ pub enum Query<'a> {
     Exists(Exists<'a>),
     Regex(Regex<'a>),
     Range(Range<'a>),
-    // Phonetic(Phonetic<'a>),
+    #[cfg(feature = "phonetic")]
+    Phonetic(Phonetic<'a>),
 }
 
 impl<'a> From<Term<'a>> for Query<'a> {
@@ -76,6 +77,13 @@ impl<'a> From<Range<'a>> for Query<'a> {
     }
 }
 
+#[cfg(feature = "phonetic")]
+impl<'a> From<Phonetic<'a>> for Query<'a> {
+    fn from(phonetic: Phonetic<'a>) -> Self {
+        Self::Phonetic(phonetic)
+    }
+}
+
 impl<'a> Query<'a> {
     // TODO: remove/refactor somehow
     pub(crate) fn set_field(self, field: String) -> Self {
@@ -102,11 +110,6 @@ impl<'a> Query<'a> {
         }
     }
 
-    // Term(Term<'a>),
-    // Phrase(Phrase<'a>),
-    // Near(Near<'a>),
-    // Regex(Regex<'a>),
-    // Range(Range<'a>),
     pub(crate) fn near(phrase: &'a str, distance: u64, ordered: bool) -> Self {
         Self::Near(Near::new(phrase, distance, ordered))
     }
@@ -410,34 +413,45 @@ impl<'a> Range<'a> {
     }
 }
 
-// #[cfg_attr(feature = "serde", derive(Serialize))]
-// #[derive(Debug, PartialEq)]
-// pub struct Phonetic<'a> {
-//     field: &'a str,
-//     original: &'a str,
-//     metaphone: String,
-//     douple_metaphone: DoubleMetaphone,
-//     // soundex
-//     // refined_soundex
-//     // caverphone1
-//     // caverphone2
-//     // cologne
-//     // nysiis
-//     // koelnerphonetik
-//     // haasephonetik
-//     // beider_morse
-//     // daitch_mokotoff
-// }
-//
-// impl<'a> Phonetic<'a> {
-//     fn new() -> Self {
-//         todo!()
-//     }
-// }
-//
-// #[cfg_attr(feature = "serde", derive(Serialize))]
-// #[derive(Debug, PartialEq)]
-// pub struct DoubleMetaphone {
-//     primary: String,
-//     secondary: Option<String>,
-// }
+#[cfg(feature = "phonetic")]
+#[cfg_attr(feature = "serde", derive(Serialize))]
+#[derive(Debug, PartialEq)]
+pub struct Phonetic<'a> {
+    field: Option<&'a str>,
+    original: &'a str,
+    metaphone: String,
+    douple_metaphone: DoubleMetaphone,
+    // soundex
+    // refined_soundex
+    // caverphone1
+    // caverphone2
+    // cologne
+    // nysiis
+    // koelnerphonetik
+    // haasephonetik
+    // beider_morse
+    // daitch_mokotoff
+}
+
+#[cfg(feature = "phonetic")]
+impl<'a> Phonetic<'a> {
+    pub(crate) fn new(original: &'a str) -> Self {
+        Self {
+            field: None,
+            original,
+            metaphone: String::new(),
+            douple_metaphone: DoubleMetaphone {
+                primary: String::new(),
+                secondary: None,
+            },
+        }
+    }
+}
+
+#[cfg(feature = "phonetic")]
+#[cfg_attr(feature = "serde", derive(Serialize))]
+#[derive(Debug, PartialEq)]
+pub struct DoubleMetaphone {
+    primary: String,
+    secondary: Option<String>,
+}

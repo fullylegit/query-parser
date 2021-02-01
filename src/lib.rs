@@ -1,17 +1,17 @@
 #![forbid(unsafe_code)]
 #![deny(unused_must_use)]
 pub mod query;
-use query::{And, Exists, Near, Not, Or, Phrase, Query, Range, Regex, Term};
+#[cfg(feature = "phonetic")]
+use query::Phonetic;
+use query::{Phrase, Query, Range, Regex, Term};
 
 use log::trace;
-use nom::bytes::complete::{escaped, escaped_transform, tag, take_until, take_while};
-use nom::character::complete::{
-    alphanumeric1, anychar, char, digit1, multispace0, none_of, one_of, satisfy,
-};
+use nom::branch::alt;
+use nom::bytes::complete::{escaped, escaped_transform, tag, take_until};
+use nom::character::complete::{char, digit1, multispace0, none_of, one_of};
 use nom::combinator::{map, map_res, opt, value};
-use nom::sequence::{delimited, pair, preceded, separated_pair, terminated, tuple};
+use nom::sequence::{delimited, preceded, separated_pair, tuple};
 use nom::IResult;
-use nom::{branch::alt, error};
 
 // TODO: move to mod.rs? make configurable?
 const DEFAULT_FUZZINESS: u64 = 2;
@@ -324,9 +324,10 @@ mod tests {
         });
     }
 
-    fn run_test<T>(test: T) -> ()
+    fn run_test<F>(test: F) -> ()
     where
-        T: FnOnce() -> () + UnwindSafe,
+        F: FnOnce() -> (),
+        F: UnwindSafe,
     {
         setup();
 
@@ -520,12 +521,13 @@ mod tests {
         })
     }
 
+    #[cfg(feature = "phonetic")]
     #[test]
-    fn metaphone() {
+    fn phonetic() {
         run_test(|| {
-            let expected = todo!();
+            let expected = Ok(("", Phonetic::new("smith").into()));
             let actual = parse("~smith");
-            // assert_eq!(expected, actual);
+            assert_eq!(expected, actual);
         })
     }
 
@@ -871,6 +873,7 @@ mod tests {
     #[test]
     fn es_docs_boolean_short_syntax() {
         run_test(|| {
+            // TODO: confirm which of these is correct
             let expected = Ok((
                 "",
                 Query::and(vec![
@@ -882,6 +885,14 @@ mod tests {
                     Query::not(Term::new("news").into()),
                 ]),
             ));
+            // let expected = Ok((
+            //     "",
+            //     Query::and(vec![
+            //         Query::or(vec![Term::new("quick").into(), Term::new("brown").into()]),
+            //         Term::new("fox").into(),
+            //         Query::not(Term::new("fox").into()),
+            //     ]),
+            // ));
             let actual = parse("quick brown +fox -news");
             assert_eq!(expected, actual);
         })
