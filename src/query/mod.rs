@@ -122,8 +122,8 @@ impl<'a> Query<'a> {
         Self::Not(Not::new(query))
     }
 
-    pub(crate) fn exists(field: &'a str) -> Self {
-        Self::Exists(Exists::new(field))
+    pub(crate) fn exists(term: Term<'a>) -> Self {
+        Self::Exists(Exists::new(term.term))
     }
 }
 

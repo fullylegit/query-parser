@@ -42,17 +42,18 @@ fn fuzziness(input: &str) -> IResult<&str, Option<u64>> {
     )(input)
 }
 
+// es docs reserved characters: + - = && || > < ! ( ) { } [ ] ^ " ~ * ? : \ /
 /// Matches any characters that can be escaped by `\`
 fn escapable(input: &str) -> IResult<&str, char> {
-    one_of("\".*")(input)
+    one_of("\".*()[]{}^~ :")(input)
 }
 
 fn escaped_without_spaces(input: &str) -> IResult<&str, &str> {
-    escaped(none_of("\\\" ^~()[]{}"), '\\', escapable)(input)
+    escaped(none_of("\\\" ^~()[]{}:"), '\\', escapable)(input)
 }
 
 fn escaped_with_spaces(input: &str) -> IResult<&str, &str> {
-    escaped(none_of("\\\"^~()[]{}"), '\\', escapable)(input)
+    escaped(none_of("\\\"^~()[]{}:"), '\\', escapable)(input)
 }
 
 fn phrase_inner(input: &str) -> IResult<&str, &str> {
@@ -147,7 +148,7 @@ fn query(input: &str) -> IResult<&str, Query> {
     let (input, _) = eat_whitespace(input)?;
     // attempt to parse a field:query pair
     let result: IResult<&str, (&str, Query)> = separated_pair(
-        alphanumeric1,
+        escaped_without_spaces,
         tag(":"),
         alt((
             group,
@@ -157,10 +158,15 @@ fn query(input: &str) -> IResult<&str, Query> {
             map(phrase, From::from),
         )),
     )(input);
+    trace!("pair: {:?} {:?}", input, result);
     match result {
         // input was a field:query pair
         Ok((input, (field, query))) => {
-            let query = query.set_field(field);
+            let query = match query {
+                // exists is a special case where the pair is backwards
+                Query::Term(term) if field == "_exists_" => Query::exists(term),
+                query => query.set_field(field),
+            };
             Ok((input, query))
         }
         // input wasn't a field:query pair, non-field parsing
@@ -491,7 +497,7 @@ mod tests {
     #[test]
     fn es_docs_field_exists() {
         run_test(|| {
-            let expected = Ok(("", Query::exists("title")));
+            let expected = Ok(("", Query::exists(Term::new("title"))));
             let actual = parse("_exists_:title");
             assert_eq!(expected, actual);
         })
@@ -802,8 +808,6 @@ mod tests {
             assert_eq!(expected, actual);
         })
     }
-
-    // es docs reserved characters: + - = && || > < ! ( ) { } [ ] ^ " ~ * ? : \ /
 
     #[test]
     fn nested_groups() {
