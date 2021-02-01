@@ -83,6 +83,7 @@ impl<'a> Query<'a> {
             Query::Term(term) => Query::Term(term.set_field(field)),
             Query::Regex(regex) => Query::Regex(regex.set_field(field)),
             Query::Phrase(phrase) => Query::Phrase(phrase.set_field(field)),
+            Query::Range(range) => Query::Range(range.set_field(field)),
             Query::Or(or) => or.set_field(field).into(),
             Query::And(and) => and.set_field(field).into(),
             // TODO: add all the other types
@@ -346,7 +347,7 @@ impl<'a> Regex<'a> {
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[derive(Debug, PartialEq)]
 pub struct Range<'a> {
-    field: &'a str,
+    field: Option<String>,
     from: &'a str,
     from_inclusive: bool,
     to: &'a str,
@@ -355,18 +356,24 @@ pub struct Range<'a> {
 
 impl<'a> Range<'a> {
     pub(crate) fn new(
-        field: &'a str,
         from: &'a str,
         from_inclusive: bool,
         to: &'a str,
         to_inclusive: bool,
     ) -> Self {
         Self {
-            field,
+            field: None,
             from,
             from_inclusive,
             to,
             to_inclusive,
+        }
+    }
+
+    pub(crate) fn set_field(self, field: String) -> Self {
+        Self {
+            field: Some(field),
+            ..self
         }
     }
 }

@@ -9,7 +9,7 @@ use nom::character::complete::{
     alphanumeric1, anychar, char, digit1, multispace0, none_of, one_of, satisfy,
 };
 use nom::combinator::{map, map_res, opt, value};
-use nom::sequence::{delimited, pair, preceded, separated_pair, terminated};
+use nom::sequence::{delimited, pair, preceded, separated_pair, terminated, tuple};
 use nom::IResult;
 use nom::{branch::alt, error};
 
@@ -164,6 +164,30 @@ fn group(input: &str) -> IResult<&str, Query> {
     Ok((input, query))
 }
 
+#[rustfmt::skip]
+fn range(input: &str) -> IResult<&str, Query> {
+    let (input, (from_type, _, from, _, _, _, to, _, to_type)) = tuple((
+        alt((
+            char('['),
+            char('{'),
+        )),
+        multispace0,
+        escaped_without_spaces,
+        multispace0,
+        tag("TO"),
+        multispace0,
+        escaped_without_spaces,
+        multispace0,
+        alt((
+            char(']'),
+            char('}'),
+        )),
+    ))(input)?;
+    trace!("range: {:?} from_type: {:?}, from: {:?}, to: {:?}, to_type: {:?}", input, from_type, from, to, to_type);
+    let query = Range::new(from, from_type == '[', to, to_type == ']').into();
+    Ok((input, query))
+}
+
 fn query(input: &str) -> IResult<&str, Query> {
     let (input, _) = eat_whitespace(input)?;
     // attempt to parse a field:query pair
@@ -174,6 +198,7 @@ fn query(input: &str) -> IResult<&str, Query> {
             group,
             within,
             adjacent,
+            range,
             map(regex, From::from),
             map(term, From::from),
             map(phrase, From::from),
@@ -589,11 +614,20 @@ mod tests {
         run_test(|| {
             let expected = Ok((
                 "",
-                Query::Range(Range::new("date", "2012-01-01", true, "2012-12-31", true)),
+                Query::Range(
+                    Range::new("2012-01-01", true, "2012-12-31", true).set_field("date".into()),
+                ),
             ));
             let actual = parse("date:[2012-01-01 TO 2012-12-31]");
             assert_eq!(expected, actual);
-            let expected = Ok(("", Query::Range(Range::new("count", "1", true, "5", true))));
+            let expected = Ok((
+                "",
+                Query::Range(
+                    Range::new("1", true, "5", true)
+                        .set_field("count".into())
+                        .into(),
+                ),
+            ));
             let actual = parse("count:[1 TO 5]");
             assert_eq!(expected, actual);
         })
@@ -604,7 +638,7 @@ mod tests {
         run_test(|| {
             let expected = Ok((
                 "",
-                Query::Range(Range::new("tag", "alpha", false, "omega", false)),
+                Query::Range(Range::new("alpha", false, "omega", false).set_field("tag".into())),
             ));
             let actual = parse("tag:{alpha TO omega}");
             assert_eq!(expected, actual);
@@ -614,7 +648,10 @@ mod tests {
     #[test]
     fn es_docs_range_inclusive_unbounded() {
         run_test(|| {
-            let expected = Ok(("", Query::Range(Range::new("count", "10", true, "*", true))));
+            let expected = Ok((
+                "",
+                Query::Range(Range::new("10", true, "*", true).set_field("count".into())),
+            ));
             let actual = parse("count:[10 TO *]");
             assert_eq!(expected, actual);
         })
@@ -625,7 +662,7 @@ mod tests {
         run_test(|| {
             let expected = Ok((
                 "",
-                Query::Range(Range::new("date", "*", false, "2012-01-01", false)),
+                Query::Range(Range::new("*", false, "2012-01-01", false).set_field("date".into())),
             ));
             let actual = parse("date:{* TO 2012-01-01}");
             assert_eq!(expected, actual);
@@ -635,7 +672,10 @@ mod tests {
     #[test]
     fn es_docs_range_mixed() {
         run_test(|| {
-            let expected = Ok(("", Query::Range(Range::new("count", "1", true, "5", false))));
+            let expected = Ok((
+                "",
+                Query::Range(Range::new("1", true, "5", false).set_field("count".into())),
+            ));
             let actual = parse("count:[1 TO 5}");
             assert_eq!(expected, actual);
         })
@@ -644,7 +684,10 @@ mod tests {
     #[test]
     fn es_docs_range_short_syntax_gt() {
         run_test(|| {
-            let expected = Ok(("", Query::Range(Range::new("age", "10", false, "*", true))));
+            let expected = Ok((
+                "",
+                Query::Range(Range::new("10", false, "*", true).set_field("age".into())),
+            ));
             let actual = parse("age:>10");
             assert_eq!(expected, actual);
         })
@@ -653,7 +696,10 @@ mod tests {
     #[test]
     fn es_docs_range_short_syntax_gte() {
         run_test(|| {
-            let expected = Ok(("", Query::Range(Range::new("age", "10", true, "*", true))));
+            let expected = Ok((
+                "",
+                Query::Range(Range::new("10", true, "*", true).set_field("age".into())),
+            ));
             let actual = parse("age:>=10");
             assert_eq!(expected, actual);
         })
@@ -662,7 +708,10 @@ mod tests {
     #[test]
     fn es_docs_range_short_syntax_lt() {
         run_test(|| {
-            let expected = Ok(("", Query::Range(Range::new("age", "*", true, "10", false))));
+            let expected = Ok((
+                "",
+                Query::Range(Range::new("*", true, "10", false).set_field("age".into())),
+            ));
             let actual = parse("age:<10");
             assert_eq!(expected, actual);
         })
@@ -671,7 +720,10 @@ mod tests {
     #[test]
     fn es_docs_range_short_syntax_lte() {
         run_test(|| {
-            let expected = Ok(("", Query::Range(Range::new("age", "*", true, "10", true))));
+            let expected = Ok((
+                "",
+                Query::Range(Range::new("*", true, "10", true).set_field("age".into())),
+            ));
             let actual = parse("age:<=10");
             assert_eq!(expected, actual);
         })
@@ -680,7 +732,10 @@ mod tests {
     #[test]
     fn es_docs_range_short_syntax_and() {
         run_test(|| {
-            let expected = Ok(("", Query::Range(Range::new("age", "10", true, "20", false))));
+            let expected = Ok((
+                "",
+                Query::Range(Range::new("10", true, "20", false).set_field("age".into())),
+            ));
             let actual = parse("age:(>=10 AND <20)");
             assert_eq!(expected, actual);
         })
@@ -689,7 +744,10 @@ mod tests {
     #[test]
     fn es_docs_range_short_syntax_plus() {
         run_test(|| {
-            let expected = Ok(("", Query::Range(Range::new("age", "10", true, "20", false))));
+            let expected = Ok((
+                "",
+                Query::Range(Range::new("10", true, "20", false).set_field("age".into())),
+            ));
             let actual = parse("age:(+>=10 +<20)");
             assert_eq!(expected, actual);
         })
