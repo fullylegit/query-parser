@@ -233,6 +233,22 @@ impl<'a> Or<'a> {
         Self { queries }
     }
 
+    pub(crate) fn push(self, query: Query<'a>) -> Self {
+        let mut queries = self.queries;
+        if let Query::Or(or) = query {
+            queries.extend(or.queries)
+        } else {
+            queries.push(query);
+        }
+        Self { queries }
+    }
+
+    pub(crate) fn prepend(self, query: Query<'a>) -> Self {
+        let mut queries = self.queries;
+        queries.insert(0, query);
+        Self { queries }
+    }
+
     fn set_boost(self, boost: f64) -> Self {
         Self {
             queries: self
@@ -268,6 +284,22 @@ pub struct And<'a> {
 
 impl<'a> And<'a> {
     fn new(queries: Vec<Query<'a>>) -> Self {
+        Self { queries }
+    }
+
+    pub(crate) fn push(self, query: Query<'a>) -> Self {
+        let mut queries = self.queries;
+        if let Query::And(and) = query {
+            queries.extend(and.queries)
+        } else {
+            queries.push(query);
+        }
+        Self { queries }
+    }
+
+    pub(crate) fn prepend(self, query: Query<'a>) -> Self {
+        let mut queries = self.queries;
+        queries.insert(0, query);
         Self { queries }
     }
 

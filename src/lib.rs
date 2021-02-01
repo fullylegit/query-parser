@@ -237,7 +237,11 @@ pub fn parse(input: &str) -> IResult<&str, Query> {
             trace!("got AND: {:?}", input);
             let (input, query) = query(input)?;
             match queries.pop() {
-                Some(prev_query) => queries.push(Query::and(vec![prev_query, query])),
+                Some(Query::And(and)) => queries.push(and.push(query).into()),
+                Some(prev_query) => match query {
+                    Query::And(and) => queries.push(and.prepend(prev_query).into()),
+                    _ => queries.push(Query::and(vec![prev_query, query])),
+                },
                 None => {
                     return Err(nom::Err::Error(nom::error::make_error(
                         input,
@@ -250,7 +254,12 @@ pub fn parse(input: &str) -> IResult<&str, Query> {
             trace!("got OR: {:?}", input);
             let (input, query) = query(input)?;
             match queries.pop() {
-                Some(prev_query) => queries.push(Query::or(vec![prev_query, query])),
+                // don't want to do this if the prev or was a different group
+                Some(Query::Or(or)) => queries.push(or.push(query).into()),
+                Some(prev_query) => match query {
+                    Query::Or(or) => queries.push(or.prepend(prev_query).into()),
+                    _ => queries.push(Query::or(vec![prev_query, query])),
+                },
                 None => {
                     // TODO: return a string: "Unexpected OR, expecting query"
                     return Err(nom::Err::Error(nom::error::make_error(
@@ -499,6 +508,23 @@ mod tests {
                 ]),
             ));
             let actual = parse("title:(quick OR brown)");
+            assert_eq!(expected, actual);
+        })
+    }
+
+    #[test]
+    fn es_docs_field_term_many_or() {
+        run_test(|| {
+            let expected = Ok((
+                "",
+                Query::or(vec![
+                    Term::new("quick").set_field("title".into()).into(),
+                    Term::new("brown").set_field("title".into()).into(),
+                    Term::new("fox").set_field("title".into()).into(),
+                    Term::new("elephant").set_field("title".into()).into(),
+                ]),
+            ));
+            let actual = parse("title:(quick OR brown OR fox OR elephant)");
             assert_eq!(expected, actual);
         })
     }
@@ -907,16 +933,14 @@ mod tests {
                 Query::and(vec![
                     Query::or(vec![
                         Term::new("hippo").into(),
-                        Query::or(vec![
-                            Term::new("eggs").into(),
-                            Query::or(vec![Term::new("quick").into(), Term::new("brown").into()]),
-                        ]),
+                        Term::new("eggs").into(),
+                        Term::new("quick").into(),
+                        Term::new("brown").into(),
                     ]),
                     Query::or(vec![
-                        Query::or(vec![
-                            Query::or(vec![Term::new("fox").into(), Term::new("elephant").into()]),
-                            Term::new("peanut").into(),
-                        ]),
+                        Term::new("fox").into(),
+                        Term::new("elephant").into(),
+                        Term::new("peanut").into(),
                         Term::new("banana").into(),
                     ]),
                 ]),
