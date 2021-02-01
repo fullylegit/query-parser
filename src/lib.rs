@@ -233,7 +233,8 @@ pub fn parse(input: &str) -> IResult<&str, Query> {
     let mut input = input;
     while !input.is_empty() {
         trace!("queries: {:?}", queries);
-        let i = if let Ok((input, _)) = tag::<_, _, ()>("AND ")(input) {
+        let (i, _) = eat_whitespace(input)?;
+        let i = if let Ok((input, _)) = alt((tag::<_, _, ()>("AND "), tag::<_, _, ()>("&&")))(i) {
             trace!("got AND: {:?}", input);
             let (input, query) = parse(input)?;
             match queries.pop() {
@@ -250,7 +251,7 @@ pub fn parse(input: &str) -> IResult<&str, Query> {
                 }
             }
             input
-        } else if let Ok((input, _)) = tag::<_, _, ()>("OR ")(input) {
+        } else if let Ok((input, _)) = alt((tag::<_, _, ()>("OR "), tag::<_, _, ()>("||")))(i) {
             trace!("got OR: {:?}", input);
             let (input, query) = parse(input)?;
             match queries.pop() {
@@ -269,15 +270,15 @@ pub fn parse(input: &str) -> IResult<&str, Query> {
                 }
             }
             input
-        } else if let Ok((input, _)) = tag::<_, _, ()>("NOT ")(input) {
+        } else if let Ok((input, _)) = alt((tag::<_, _, ()>("NOT "), tag::<_, _, ()>("!")))(i) {
             trace!("got NOT: {:?}", input);
             let (input, query) = query(input)?;
             queries.push(Query::not(query));
             input
-        } else if char::<_, ()>(')')(input).is_ok() {
+        } else if char::<_, ()>(')')(i).is_ok() {
             // end of a group, return all the queries. don't advance input
             break;
-        } else if let Ok((input, Some(boost))) = boost(input) {
+        } else if let Ok((input, Some(boost))) = boost(i) {
             trace!("input: {:?} boost: {:?}", input, boost);
             // boost
             match queries.pop() {
@@ -292,7 +293,7 @@ pub fn parse(input: &str) -> IResult<&str, Query> {
             }
             input
         } else {
-            let (i, query) = query(input)?;
+            let (i, query) = query(i)?;
             queries.push(query);
             i
         };
