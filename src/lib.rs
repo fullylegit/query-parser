@@ -235,7 +235,7 @@ pub fn parse(input: &str) -> IResult<&str, Query> {
         trace!("queries: {:?}", queries);
         let i = if let Ok((input, _)) = tag::<_, _, ()>("AND ")(input) {
             trace!("got AND: {:?}", input);
-            let (input, query) = query(input)?;
+            let (input, query) = parse(input)?;
             match queries.pop() {
                 Some(Query::And(and)) => queries.push(and.push(query).into()),
                 Some(prev_query) => match query {
@@ -252,7 +252,7 @@ pub fn parse(input: &str) -> IResult<&str, Query> {
             input
         } else if let Ok((input, _)) = tag::<_, _, ()>("OR ")(input) {
             trace!("got OR: {:?}", input);
-            let (input, query) = query(input)?;
+            let (input, query) = parse(input)?;
             match queries.pop() {
                 // don't want to do this if the prev or was a different group
                 Some(Query::Or(or)) => queries.push(or.push(query).into()),
@@ -268,6 +268,11 @@ pub fn parse(input: &str) -> IResult<&str, Query> {
                     )));
                 }
             }
+            input
+        } else if let Ok((input, _)) = tag::<_, _, ()>("NOT ")(input) {
+            trace!("got NOT: {:?}", input);
+            let (input, query) = query(input)?;
+            queries.push(Query::not(query));
             input
         } else if char::<_, ()>(')')(input).is_ok() {
             // end of a group, return all the queries. don't advance input
@@ -469,6 +474,48 @@ mod tests {
                 Query::near("the quick brown fox jumps over the lazy dog", 3, true),
             ));
             let actual = parse("the quick brown fox jumps over the lazy dog ADJ 3");
+            assert_eq!(expected, actual);
+        })
+    }
+
+    #[test]
+    fn nested_groups() {
+        run_test(|| {
+            let expected = Ok((
+                "",
+                Query::and(vec![
+                    Query::or(vec![
+                        Term::new("hippo").into(),
+                        Term::new("eggs").into(),
+                        Term::new("quick").into(),
+                        Term::new("brown").into(),
+                    ]),
+                    Query::or(vec![
+                        Term::new("fox").into(),
+                        Term::new("elephant").into(),
+                        Term::new("peanut").into(),
+                        Term::new("banana").into(),
+                    ]),
+                ]),
+            ));
+            let actual = parse(
+            "(hippo OR (eggs OR (quick OR brown))) AND (((fox OR elephant) OR peanut) OR banana)",
+        );
+            assert_eq!(expected, actual);
+        })
+    }
+
+    #[test]
+    fn not() {
+        run_test(|| {
+            let expected = Ok((
+                "",
+                Query::and(vec![
+                    Query::not(Term::new("news").into()),
+                    Term::new("eggs").into(),
+                ]),
+            ));
+            let actual = parse("NOT news AND eggs");
             assert_eq!(expected, actual);
         })
     }
@@ -921,33 +968,6 @@ mod tests {
                 ]),
             ));
             let actual = parse("status:(active OR pending) title:(full text search)^2");
-            assert_eq!(expected, actual);
-        })
-    }
-
-    #[test]
-    fn nested_groups() {
-        run_test(|| {
-            let expected = Ok((
-                "",
-                Query::and(vec![
-                    Query::or(vec![
-                        Term::new("hippo").into(),
-                        Term::new("eggs").into(),
-                        Term::new("quick").into(),
-                        Term::new("brown").into(),
-                    ]),
-                    Query::or(vec![
-                        Term::new("fox").into(),
-                        Term::new("elephant").into(),
-                        Term::new("peanut").into(),
-                        Term::new("banana").into(),
-                    ]),
-                ]),
-            ));
-            let actual = parse(
-            "(hippo OR (eggs OR (quick OR brown))) AND (((fox OR elephant) OR peanut) OR banana)",
-        );
             assert_eq!(expected, actual);
         })
     }
