@@ -264,11 +264,6 @@ pub fn parse(input: &str) -> IResult<&str, Query> {
     Ok((input, query))
 }
 
-#[cfg(feature = "json")]
-pub fn to_json(input: &str) -> Result<String, String> {
-    serde_json::to_string(&parse(input)?)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

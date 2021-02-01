@@ -1,11 +1,11 @@
-#[cfg(any(feature = "serde"))]
+#[cfg(feature = "serde")]
 use serde::Serialize;
 
 const DEFAULT_BOOST: f64 = 1.0;
 
 #[cfg_attr(
     feature = "serde",
-    derive("Serialize"),
+    derive(Serialize),
     serde(tag = "type", rename_all = "snake_case")
 )]
 #[derive(Debug, PartialEq)]
@@ -127,7 +127,7 @@ impl<'a> Query<'a> {
     }
 }
 
-#[cfg_attr(feature = "json", derive)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 #[derive(Debug, Default, PartialEq)]
 pub struct Term<'a> {
     term: &'a str,
@@ -174,7 +174,7 @@ impl<'a> Term<'a> {
     }
 }
 
-#[cfg_attr(feature = "json", derive)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 #[derive(Debug, PartialEq)]
 pub struct Phrase<'a> {
     phrase: &'a str,
@@ -204,7 +204,7 @@ impl<'a> Phrase<'a> {
     }
 }
 
-#[cfg_attr(feature = "json", derive)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 #[derive(Debug, PartialEq)]
 pub struct Near<'a> {
     phrase: &'a str,
@@ -221,7 +221,7 @@ impl<'a> Near<'a> {
         }
     }
 }
-#[cfg_attr(feature = "json", derive)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 #[derive(Debug, PartialEq)]
 pub struct Or<'a> {
     queries: Vec<Query<'a>>,
@@ -259,7 +259,7 @@ impl<'a> From<Vec<Query<'a>>> for Or<'a> {
     }
 }
 
-#[cfg_attr(feature = "json", derive)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 #[derive(Debug, PartialEq)]
 pub struct And<'a> {
     queries: Vec<Query<'a>>,
@@ -297,7 +297,7 @@ impl<'a> From<Vec<Query<'a>>> for And<'a> {
     }
 }
 
-#[cfg_attr(feature = "json", derive)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 #[derive(Debug, PartialEq)]
 pub struct Not<'a> {
     query: Box<Query<'a>>,
@@ -311,7 +311,7 @@ impl<'a> Not<'a> {
     }
 }
 
-#[cfg_attr(feature = "json", derive)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 #[derive(Debug, PartialEq)]
 pub struct Exists<'a> {
     field: &'a str,
@@ -323,7 +323,7 @@ impl<'a> Exists<'a> {
     }
 }
 
-#[cfg_attr(feature = "json", derive)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 #[derive(Debug, PartialEq)]
 pub struct Regex<'a> {
     regex: &'a str,
@@ -343,7 +343,7 @@ impl<'a> Regex<'a> {
     }
 }
 
-#[cfg_attr(feature = "json", derive)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 #[derive(Debug, PartialEq)]
 pub struct Range<'a> {
     field: &'a str,
@@ -371,7 +371,7 @@ impl<'a> Range<'a> {
     }
 }
 
-// #[cfg_attr(feature = "json", derive)]
+// #[cfg_attr(feature = "serde", derive(Serialize))]
 // #[derive(Debug, PartialEq)]
 // pub struct Phonetic<'a> {
 //     field: &'a str,
@@ -396,7 +396,7 @@ impl<'a> Range<'a> {
 //     }
 // }
 //
-// #[cfg_attr(feature = "json", derive)]
+// #[cfg_attr(feature = "serde", derive(Serialize))]
 // #[derive(Debug, PartialEq)]
 // pub struct DoubleMetaphone {
 //     primary: String,
