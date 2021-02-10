@@ -421,6 +421,15 @@ mod tests {
     }
 
     #[test]
+    fn single_term_fractional_boosted() {
+        run_test(|| {
+            let expected = Ok(("", Query::Term(Term::new("word").set_boost(5.05))));
+            let actual = parse("word^5.05");
+            assert_eq!(expected, actual);
+        })
+    }
+
+    #[test]
     fn single_term_fuzzy() {
         run_test(|| {
             let expected = Ok(("", Query::Term(Term::new("word").set_fuzziness(5))));
