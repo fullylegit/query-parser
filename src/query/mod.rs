@@ -1,8 +1,6 @@
 #[cfg(feature = "serde")]
 use serde::Serialize;
 
-const DEFAULT_BOOST: f64 = 1.0;
-
 #[cfg_attr(
     feature = "serde",
     derive(Serialize),
@@ -105,6 +103,7 @@ impl<'a> Query<'a> {
             Query::And(and) => and.set_boost(boost).into(),
             Query::Term(term) => term.set_boost(boost).into(),
             Query::Phrase(phrase) => phrase.set_boost(boost).into(),
+            Query::Exists(exists) => exists.set_boost(boost).into(),
             // TODO: add all the other types
             _ => self,
         }
@@ -127,7 +126,7 @@ impl<'a> Query<'a> {
     }
 
     pub(crate) fn exists(term: Term<'a>) -> Self {
-        Self::Exists(Exists::new(term.term))
+        Self::Exists(Exists::from(term))
     }
 }
 
@@ -135,8 +134,8 @@ impl<'a> Query<'a> {
 #[derive(Debug, Default, PartialEq)]
 pub struct Term<'a> {
     term: &'a str,
-    boost: f64,
-    fuzziness: u64,
+    boost: Option<f64>,
+    fuzziness: Option<u64>,
     field: Option<String>,
 }
 
@@ -144,18 +143,24 @@ impl<'a> Term<'a> {
     pub(crate) fn new(term: &'a str) -> Self {
         Self {
             term,
-            boost: DEFAULT_BOOST,
+            boost: None,
             ..Default::default()
         }
     }
 
     pub(crate) fn set_boost(self, boost: f64) -> Self {
         // TODO: must be positive
-        Self { boost, ..self }
+        Self {
+            boost: Some(boost),
+            ..self
+        }
     }
 
     pub(crate) fn set_fuzziness(self, fuzziness: u64) -> Self {
-        Self { fuzziness, ..self }
+        Self {
+            fuzziness: Some(fuzziness),
+            ..self
+        }
     }
 
     pub(crate) fn set_field(self, field: String) -> Self {
@@ -169,11 +174,11 @@ impl<'a> Term<'a> {
         self.term
     }
 
-    pub fn boost(&self) -> f64 {
+    pub fn boost(&self) -> Option<f64> {
         self.boost
     }
 
-    pub fn fuzziness(&self) -> u64 {
+    pub fn fuzziness(&self) -> Option<u64> {
         self.fuzziness
     }
 }
@@ -182,7 +187,7 @@ impl<'a> Term<'a> {
 #[derive(Debug, PartialEq)]
 pub struct Phrase<'a> {
     phrase: &'a str,
-    boost: f64,
+    boost: Option<f64>,
     field: Option<String>,
 }
 
@@ -190,7 +195,7 @@ impl<'a> Phrase<'a> {
     pub(crate) fn new(phrase: &'a str) -> Self {
         Self {
             phrase,
-            boost: DEFAULT_BOOST,
+            boost: None,
             field: None,
         }
     }
@@ -204,7 +209,10 @@ impl<'a> Phrase<'a> {
 
     pub(crate) fn set_boost(self, boost: f64) -> Self {
         // TODO: must be positive
-        Self { boost, ..self }
+        Self {
+            boost: Some(boost),
+            ..self
+        }
     }
 }
 
@@ -351,11 +359,24 @@ impl<'a> Not<'a> {
 #[derive(Debug, PartialEq)]
 pub struct Exists<'a> {
     field: &'a str,
+    boost: Option<f64>,
+}
+
+impl<'a> From<Term<'a>> for Exists<'a> {
+    fn from(term: Term<'a>) -> Self {
+        Self {
+            field: term.term,
+            boost: term.boost,
+        }
+    }
 }
 
 impl<'a> Exists<'a> {
-    fn new(field: &'a str) -> Self {
-        Self { field }
+    pub(crate) fn set_boost(self, boost: f64) -> Self {
+        Self {
+            boost: Some(boost),
+            ..self
+        }
     }
 }
 

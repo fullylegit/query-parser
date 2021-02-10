@@ -616,6 +616,15 @@ mod tests {
         })
     }
 
+    #[test]
+    fn field_exists_boosted() {
+        run_test(|| {
+            let expected = Ok(("", Query::exists(Term::new("title")).set_boost(3.3)));
+            let actual = parse("_exists_:title^3.3");
+            assert_eq!(expected, actual);
+        })
+    }
+
     // The `es_docs_*` tests are all taken from the Elastic query string syntax docs at
     // https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-query-string-query.html#query-string-syntax
 
