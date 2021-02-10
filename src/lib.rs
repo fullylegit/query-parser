@@ -21,9 +21,28 @@ fn eat_whitespace(input: &str) -> IResult<&str, ()> {
     Ok((input, ()))
 }
 
+fn float1(input: &str) -> IResult<&str, &str> {
+    let (i, negative) = opt(char('-'))(input)?;
+    let (i, whole) = digit1(i)?;
+    let (i, decimal) = opt(char('.'))(i)?;
+    let (_, fraction) = match decimal {
+        Some(_) => {
+            let (i, fraction) = digit1(i)?;
+            (i, Some(fraction))
+        }
+        None => (i, None),
+    };
+    let matching_len = negative.map(|_| 1).unwrap_or(0)
+        + whole.len()
+        + decimal.map(|_| 1).unwrap_or(0)
+        + fraction.unwrap_or("").len();
+    let (matching, remainder) = input.split_at(matching_len);
+    Ok((remainder, matching))
+}
+
 fn boost(input: &str) -> IResult<&str, Option<f64>> {
     map_res::<_, _, _, _, <f64 as std::str::FromStr>::Err, _, _>(
-        opt(preceded(char('^'), digit1)),
+        opt(preceded(char('^'), float1)),
         |res: Option<&str>| match res {
             Some(num) => Ok(Some(num.parse::<f64>()?)),
             None => Ok(None),
