@@ -80,6 +80,32 @@ fn regex(input: &str) -> IResult<&str, Query> {
     Ok((input, Regex::new(regex).into()))
 }
 
+fn take_till_reserved_word(input: &str) -> IResult<&str, &str> {
+    // NOTE: this should only be run on unquoted phrases. Does not handle escaped chars
+    let indexes = &[
+        input.find(" AND "),
+        input.find(" OR "),
+        input.find(" NOT "),
+        input.find("&&"),
+        input.find("||"),
+        input.find("!"),
+        input.find(" WITHIN "),
+        input.find(" ADJ "),
+        input.find("("),
+    ];
+    let min = match indexes.iter().filter_map(Option::as_ref).min() {
+        Some(min) => *min,
+        None => {
+            return Err(nom::Err::Error(nom::error::make_error(
+                input,
+                nom::error::ErrorKind::Tag,
+            )))
+        }
+    };
+    let (matched, remaining) = input.split_at(min);
+    Ok((remaining, matched))
+}
+
 // TODO: refactor the common parts of `adjacent` and `within` into a single parser
 fn within(input: &str) -> IResult<&str, Query> {
     let (input, _) = eat_whitespace(input)?;
@@ -97,7 +123,7 @@ fn within(input: &str) -> IResult<&str, Query> {
         }
         _ => {
             // unquoted phrase - only supports WITHIN, not ~
-            let (input, phrase) = take_until(" WITHIN")(input)?;
+            let (input, phrase) = take_till_reserved_word(input)?;
             let (input, distance) =
                 preceded(tag(" WITHIN "), map_res(digit1, |s: &str| s.parse::<u64>()))(input)?;
             trace!("got within: {:?} {:?}", input, distance);
@@ -125,7 +151,7 @@ fn adjacent(input: &str) -> IResult<&str, Query> {
         }
         _ => {
             // unquoted phrase
-            let (input, phrase) = take_until(" ADJ")(input)?;
+            let (input, phrase) = take_till_reserved_word(input)?;
             let (input, distance) =
                 preceded(tag(" ADJ "), map_res(digit1, |s: &str| s.parse::<u64>()))(input)?;
             trace!("got adjacent: {:?} {:?}", input, distance);
