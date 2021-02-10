@@ -83,6 +83,7 @@ fn regex(input: &str) -> IResult<&str, Query> {
 // TODO: refactor the common parts of `adjacent` and `within` into a single parser
 fn within(input: &str) -> IResult<&str, Query> {
     let (input, _) = eat_whitespace(input)?;
+    trace!("attepmt within: {:?}", input);
     // TODO: handle multiple spaces around `WITHIN`
     let (input, phrase, distance) = match input.chars().next() {
         Some('"') => {
@@ -99,6 +100,7 @@ fn within(input: &str) -> IResult<&str, Query> {
             let (input, phrase) = take_until(" WITHIN")(input)?;
             let (input, distance) =
                 preceded(tag(" WITHIN "), map_res(digit1, |s: &str| s.parse::<u64>()))(input)?;
+            trace!("got within: {:?} {:?}", input, distance);
             (input, phrase, distance)
         }
     };
@@ -109,6 +111,7 @@ fn within(input: &str) -> IResult<&str, Query> {
 // TODO: refactor the common parts of `adjacent` and `within` into a single parser
 fn adjacent(input: &str) -> IResult<&str, Query> {
     let (input, _) = eat_whitespace(input)?;
+    trace!("attempt adjacent: {:?}", input);
     // TODO: handle multiple spaces around `ADJ`
     let (input, phrase, distance) = match input.chars().next() {
         Some('"') => {
@@ -125,6 +128,7 @@ fn adjacent(input: &str) -> IResult<&str, Query> {
             let (input, phrase) = take_until(" ADJ")(input)?;
             let (input, distance) =
                 preceded(tag(" ADJ "), map_res(digit1, |s: &str| s.parse::<u64>()))(input)?;
+            trace!("got adjacent: {:?} {:?}", input, distance);
             (input, phrase, distance)
         }
     };
@@ -158,9 +162,9 @@ fn term(input: &str) -> IResult<&str, Term> {
 
 fn group(input: &str) -> IResult<&str, Query> {
     let (input, _) = eat_whitespace(input)?;
-    trace!("group: {:?}", input);
+    trace!("attempt group: {:?}", input);
     let (input, query) = delimited(char('('), parse, char(')'))(input)?;
-    trace!("input: {:?}\nbody: {:?}", input, query);
+    trace!("got group input: {:?} body: {:?}", input, query);
     Ok((input, query))
 }
 
@@ -276,6 +280,7 @@ pub fn parse(input: &str) -> IResult<&str, Query> {
             queries.push(Query::not(query));
             input
         } else if char::<_, ()>(')')(i).is_ok() {
+            trace!("got end of group");
             // end of a group, return all the queries. don't advance input
             break;
         } else if let Ok((input, Some(boost))) = boost(i) {
@@ -293,6 +298,7 @@ pub fn parse(input: &str) -> IResult<&str, Query> {
             }
             input
         } else {
+            trace!("attempt query: {:?}", i);
             let (i, query) = query(i)?;
             queries.push(query);
             i
