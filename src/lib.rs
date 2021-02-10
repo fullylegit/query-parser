@@ -538,6 +538,21 @@ mod tests {
         })
     }
 
+    #[test]
+    fn term_and_near() {
+        run_test(|| {
+            let expected = Ok((
+                "",
+                Query::and(vec![
+                    Term::new("eggs").set_field("_id".to_owned()).into(),
+                    Query::near("john smith", 3, false),
+                ]),
+            ));
+            let actual = parse(r#"_id:eggs AND "john smith" WITHIN 3"#);
+            assert_eq!(expected, actual);
+        })
+    }
+
     // The `es_docs_*` tests are all taken from the Elastic query string syntax docs at
     // https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-query-string-query.html#query-string-syntax
 
