@@ -13,353 +13,394 @@ use nom::combinator::{map, map_res, opt, value};
 use nom::sequence::{delimited, preceded, separated_pair, tuple};
 use nom::IResult;
 
-// TODO: move to mod.rs? make configurable?
-const DEFAULT_FUZZINESS: u64 = 2;
-
-fn eat_whitespace(input: &str) -> IResult<&str, ()> {
-    let (input, _whitespace) = multispace0(input)?;
-    Ok((input, ()))
+#[derive(Debug, Clone, Copy)]
+pub enum Operator {
+    And,
+    Or,
 }
 
-fn float1(input: &str) -> IResult<&str, &str> {
-    let (i, negative) = opt(char('-'))(input)?;
-    let (i, whole) = digit1(i)?;
-    let (i, decimal) = opt(char('.'))(i)?;
-    let (_, fraction) = match decimal {
-        Some(_) => {
-            let (i, fraction) = digit1(i)?;
-            (i, Some(fraction))
+#[derive(Debug, Clone, Copy)]
+pub struct Config {
+    default_fuzziness: u64,
+    default_operator: Operator,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            default_fuzziness: 2,
+            default_operator: Operator::Or,
         }
-        None => (i, None),
-    };
-    let matching_len = negative.map(|_| 1).unwrap_or(0)
-        + whole.len()
-        + decimal.map(|_| 1).unwrap_or(0)
-        + fraction.unwrap_or("").len();
-    let (matching, remainder) = input.split_at(matching_len);
-    Ok((remainder, matching))
-}
-
-fn boost(input: &str) -> IResult<&str, Option<f64>> {
-    map_res::<_, _, _, _, <f64 as std::str::FromStr>::Err, _, _>(
-        opt(preceded(char('^'), float1)),
-        |res: Option<&str>| match res {
-            Some(num) => Ok(Some(num.parse::<f64>()?)),
-            None => Ok(None),
-        },
-    )(input)
-}
-
-fn fuzziness(input: &str) -> IResult<&str, Option<u64>> {
-    map_res::<_, _, _, _, <u64 as std::str::FromStr>::Err, _, _>(
-        opt(preceded(char('~'), opt(digit1))),
-        |res: Option<Option<&str>>| match res {
-            Some(None) => Ok(Some(DEFAULT_FUZZINESS)),
-            Some(Some(num)) => Ok(Some(num.parse::<u64>()?)),
-            None => Ok(None),
-        },
-    )(input)
-}
-
-// es docs reserved characters: + - = && || > < ! ( ) { } [ ] ^ " ~ * ? : \ /
-/// Matches any characters that can be escaped by `\`
-fn escapable(input: &str) -> IResult<&str, char> {
-    one_of("\"()[]{}^~ :*")(input)
-}
-
-#[rustfmt::skip]
-fn escapable_transform(input: &str) -> IResult<&str, &str> {
-    trace!("escapable_transform: {:?}", input);
-    alt((
-        value("*", tag("*")),
-        value(" ", tag(" ")),
-    ))(input)
-}
-
-fn escaped_without_spaces(input: &str) -> IResult<&str, &str> {
-    // TODO: change this to escaped_transform
-    escaped(none_of("\\\"^~()[]{}: "), '\\', escapable)(input)
-}
-
-fn escaped_with_spaces(input: &str) -> IResult<&str, &str> {
-    // TODO: change this to escaped_transform
-    escaped(none_of("\\\"^~()[]{}:"), '\\', escapable)(input)
-}
-
-fn escaped_field_name(input: &str) -> IResult<&str, String> {
-    escaped_transform(none_of("\\\"^~()[]{}:*"), '\\', escapable_transform)(input)
-}
-
-fn phrase_inner(input: &str) -> IResult<&str, &str> {
-    delimited(char('"'), escaped_with_spaces, char('"'))(input)
-}
-
-fn regex(input: &str) -> IResult<&str, Query> {
-    let (input, regex) = delimited(char('/'), take_until("/"), char('/'))(input)?;
-    Ok((input, Regex::new(regex).into()))
-}
-
-fn take_till_reserved_word(input: &str) -> IResult<&str, &str> {
-    // NOTE: this should only be run on unquoted phrases. Does not handle escaped chars
-    let indexes = &[
-        input.find(" AND "),
-        input.find(" OR "),
-        input.find(" NOT "),
-        input.find("&&"),
-        input.find("||"),
-        input.find("!"),
-        input.find(" WITHIN "),
-        input.find(" ADJ "),
-        input.find("("),
-    ];
-    let min = match indexes.iter().filter_map(Option::as_ref).min() {
-        Some(min) => *min,
-        None => {
-            return Err(nom::Err::Error(nom::error::make_error(
-                input,
-                nom::error::ErrorKind::Tag,
-            )))
-        }
-    };
-    let (matched, remaining) = input.split_at(min);
-    Ok((remaining, matched))
-}
-
-// TODO: refactor the common parts of `adjacent` and `within` into a single parser
-fn within(input: &str) -> IResult<&str, Query> {
-    let (input, _) = eat_whitespace(input)?;
-    trace!("attepmt within: {:?}", input);
-    // TODO: handle multiple spaces around `WITHIN`
-    let (input, phrase, distance) = match input.chars().next() {
-        Some('"') => {
-            // quoted phrase
-            let (input, (phrase, distance)) = separated_pair(
-                phrase_inner,
-                alt((tag(" WITHIN "), tag("~"))),
-                map_res(digit1, |s: &str| s.parse::<u64>()),
-            )(input)?;
-            (input, phrase, distance)
-        }
-        _ => {
-            // unquoted phrase - only supports WITHIN, not ~
-            let (input, phrase) = take_till_reserved_word(input)?;
-            let (input, distance) =
-                preceded(tag(" WITHIN "), map_res(digit1, |s: &str| s.parse::<u64>()))(input)?;
-            trace!("got within: {:?} {:?}", input, distance);
-            (input, phrase, distance)
-        }
-    };
-
-    Ok((input, Query::near(phrase, distance, false)))
-}
-
-// TODO: refactor the common parts of `adjacent` and `within` into a single parser
-fn adjacent(input: &str) -> IResult<&str, Query> {
-    let (input, _) = eat_whitespace(input)?;
-    trace!("attempt adjacent: {:?}", input);
-    // TODO: handle multiple spaces around `ADJ`
-    let (input, phrase, distance) = match input.chars().next() {
-        Some('"') => {
-            // quoted phrase
-            let (input, (phrase, distance)) = separated_pair(
-                phrase_inner,
-                tag(" ADJ "),
-                map_res(digit1, |s: &str| s.parse::<u64>()),
-            )(input)?;
-            (input, phrase, distance)
-        }
-        _ => {
-            // unquoted phrase
-            let (input, phrase) = take_till_reserved_word(input)?;
-            let (input, distance) =
-                preceded(tag(" ADJ "), map_res(digit1, |s: &str| s.parse::<u64>()))(input)?;
-            trace!("got adjacent: {:?} {:?}", input, distance);
-            (input, phrase, distance)
-        }
-    };
-    Ok((input, Query::near(phrase, distance, true)))
-}
-
-fn phrase(input: &str) -> IResult<&str, Phrase> {
-    map(phrase_inner, |s| Phrase::new(s))(input)
-}
-
-fn term(input: &str) -> IResult<&str, Term> {
-    let (input, _) = eat_whitespace(input)?;
-    let (input, word) = escaped_without_spaces(input)?;
-    let (input, maybe_boost) = boost(input)?;
-    let (input, fuzziness) = fuzziness(input)?;
-    let (input, boost) = match maybe_boost {
-        Some(boost) => (input, Some(boost)),
-        None => boost(input)?,
-    };
-    Ok((input, {
-        let mut term = Term::new(word);
-        if let Some(boost) = boost {
-            term = term.set_boost(boost);
-        }
-        if let Some(fuzziness) = fuzziness {
-            term = term.set_fuzziness(fuzziness);
-        }
-        term
-    }))
-}
-
-fn group(input: &str) -> IResult<&str, Query> {
-    let (input, _) = eat_whitespace(input)?;
-    trace!("attempt group: {:?}", input);
-    let (input, query) = delimited(char('('), parse, char(')'))(input)?;
-    trace!("got group input: {:?} body: {:?}", input, query);
-    Ok((input, query))
-}
-
-#[rustfmt::skip]
-fn range(input: &str) -> IResult<&str, Query> {
-    let (input, (from_type, _, from, _, _, _, to, _, to_type)) = tuple((
-        alt((
-            char('['),
-            char('{'),
-        )),
-        multispace0,
-        escaped_without_spaces,
-        multispace0,
-        tag("TO"),
-        multispace0,
-        escaped_without_spaces,
-        multispace0,
-        alt((
-            char(']'),
-            char('}'),
-        )),
-    ))(input)?;
-    trace!("range: {:?} from_type: {:?}, from: {:?}, to: {:?}, to_type: {:?}", input, from_type, from, to, to_type);
-    let query = Range::new(from, from_type == '[', to, to_type == ']').into();
-    Ok((input, query))
-}
-
-fn query(input: &str) -> IResult<&str, Query> {
-    let (input, _) = eat_whitespace(input)?;
-    // attempt to parse a field:query pair
-    let result: IResult<&str, (String, Query)> = separated_pair(
-        escaped_field_name,
-        tag(":"),
-        alt((
-            group,
-            within,
-            adjacent,
-            range,
-            map(regex, From::from),
-            map(term, From::from),
-            map(phrase, From::from),
-        )),
-    )(input);
-    trace!("pair: {:?} {:?}", input, result);
-    match result {
-        // input was a field:query pair
-        Ok((input, (field, query))) => {
-            let query = match query {
-                // exists is a special case where the pair is backwards
-                Query::Term(term) if field == "_exists_" => Query::exists(term),
-                query => query.set_field(field),
-            };
-            Ok((input, query))
-        }
-        // input wasn't a field:query pair, non-field parsing
-        Err(_) => alt((
-            group,
-            within,
-            adjacent,
-            map(regex, From::from),
-            map(term, From::from),
-            map(phrase, From::from),
-        ))(input),
     }
 }
 
-pub fn parse(input: &str) -> IResult<&str, Query> {
-    trace!("parse: {:?}", input);
-    let mut queries = vec![];
-    let mut input = input;
-    while !input.is_empty() {
-        trace!("queries: {:?}", queries);
-        let (i, _) = eat_whitespace(input)?;
-        let i = if let Ok((input, _)) = alt((tag::<_, _, ()>("AND "), tag::<_, _, ()>("&&")))(i) {
-            trace!("got AND: {:?}", input);
-            let (input, query) = parse(input)?;
-            match queries.pop() {
-                Some(Query::And(and)) => queries.push(and.push(query).into()),
-                Some(prev_query) => match query {
-                    Query::And(and) => queries.push(and.prepend(prev_query).into()),
-                    _ => queries.push(Query::and(vec![prev_query, query])),
-                },
-                None => {
-                    return Err(nom::Err::Error(nom::error::make_error(
-                        input,
-                        nom::error::ErrorKind::Tag,
-                    )))
-                }
+#[derive(Debug, Default, Clone, Copy)]
+pub struct Parser {
+    config: Config,
+}
+
+impl Parser {
+    pub fn with_config(config: Config) -> Self {
+        Self { config }
+    }
+
+    fn eat_whitespace<'a>(&self, input: &'a str) -> IResult<&'a str, ()> {
+        let (input, _whitespace) = multispace0(input)?;
+        Ok((input, ()))
+    }
+
+    fn float1<'a>(&self, input: &'a str) -> IResult<&'a str, &'a str> {
+        let (i, negative) = opt(char('-'))(input)?;
+        let (i, whole) = digit1(i)?;
+        let (i, decimal) = opt(char('.'))(i)?;
+        let (_, fraction) = match decimal {
+            Some(_) => {
+                let (i, fraction) = digit1(i)?;
+                (i, Some(fraction))
             }
-            input
-        } else if let Ok((input, _)) = alt((tag::<_, _, ()>("OR "), tag::<_, _, ()>("||")))(i) {
-            trace!("got OR: {:?}", input);
-            let (input, query) = parse(input)?;
-            match queries.pop() {
-                // don't want to do this if the prev or was a different group
-                Some(Query::Or(or)) => queries.push(or.push(query).into()),
-                Some(prev_query) => match query {
-                    Query::Or(or) => queries.push(or.prepend(prev_query).into()),
-                    _ => queries.push(Query::or(vec![prev_query, query])),
-                },
-                None => {
-                    // TODO: return a string: "Unexpected OR, expecting query"
-                    return Err(nom::Err::Error(nom::error::make_error(
-                        input,
-                        nom::error::ErrorKind::Tag,
-                    )));
-                }
-            }
-            input
-        } else if let Ok((input, _)) = alt((tag::<_, _, ()>("NOT "), tag::<_, _, ()>("!")))(i) {
-            trace!("got NOT: {:?}", input);
-            let (input, query) = query(input)?;
-            queries.push(Query::not(query));
-            input
-        } else if char::<_, ()>(')')(i).is_ok() {
-            trace!("got end of group");
-            // end of a group, return all the queries. don't advance input
-            break;
-        } else if let Ok((input, Some(boost))) = boost(i) {
-            trace!("input: {:?} boost: {:?}", input, boost);
-            // boost
-            match queries.pop() {
-                Some(prev_query) => queries.push(prev_query.set_boost(boost)),
-                None => {
-                    // TODO: return a string: "Unexpected boost, expecting query"
-                    return Err(nom::Err::Error(nom::error::make_error(
-                        input,
-                        nom::error::ErrorKind::Tag,
-                    )));
-                }
-            }
-            input
-        } else {
-            trace!("attempt query: {:?}", i);
-            let (i, query) = query(i)?;
-            queries.push(query);
-            i
+            None => (i, None),
         };
-        let (i, _whitespace) = multispace0(i)?;
-        input = i;
+        let matching_len = negative.map(|_| 1).unwrap_or(0)
+            + whole.len()
+            + decimal.map(|_| 1).unwrap_or(0)
+            + fraction.unwrap_or("").len();
+        let (matching, remainder) = input.split_at(matching_len);
+        Ok((remainder, matching))
     }
-    let query = if queries.len() == 1 {
-        let mut queries = queries;
-        queries.remove(0)
-    } else {
-        // Default is OR
-        // TODO: make the default configurable
-        Query::or(queries)
-    };
-    Ok((input, query))
+
+    fn boost<'a>(&self, input: &'a str) -> IResult<&'a str, Option<f64>> {
+        map_res::<_, _, _, _, <f64 as std::str::FromStr>::Err, _, _>(
+            opt(preceded(char('^'), |input| self.float1(input))),
+            |res: Option<&str>| match res {
+                Some(num) => Ok(Some(num.parse::<f64>()?)),
+                None => Ok(None),
+            },
+        )(input)
+    }
+
+    fn fuzziness<'a>(&self, input: &'a str) -> IResult<&'a str, Option<u64>> {
+        map_res::<_, _, _, _, <u64 as std::str::FromStr>::Err, _, _>(
+            opt(preceded(char('~'), opt(digit1))),
+            |res: Option<Option<&str>>| match res {
+                Some(None) => Ok(Some(self.config.default_fuzziness)),
+                Some(Some(num)) => Ok(Some(num.parse::<u64>()?)),
+                None => Ok(None),
+            },
+        )(input)
+    }
+
+    // es docs reserved characters: + - = && || > < ! ( ) { } [ ] ^ " ~ * ? : \ /
+    /// Matches any characters that can be escaped by `\`
+    fn escapable<'a>(&self, input: &'a str) -> IResult<&'a str, char> {
+        one_of("\"()[]{}^~ :*")(input)
+    }
+
+    #[rustfmt::skip]
+    fn escapable_transform<'a>(&self, input: &'a str) -> IResult<&'a str, &'a str> {
+        trace!("escapable_transform: {:?}", input);
+        alt((
+            value("*", tag("*")),
+            value(" ", tag(" ")),
+        ))(input)
+    }
+
+    fn escaped_without_spaces<'a>(&self, input: &'a str) -> IResult<&'a str, &'a str> {
+        // TODO: change this to escaped_transform
+        escaped(none_of("\\\"^~()[]{}: "), '\\', |input| {
+            self.escapable(input)
+        })(input)
+    }
+
+    fn escaped_with_spaces<'a>(&self, input: &'a str) -> IResult<&'a str, &'a str> {
+        // TODO: change this to escaped_transform
+        escaped(none_of("\\\"^~()[]{}:"), '\\', |input| {
+            self.escapable(input)
+        })(input)
+    }
+
+    fn escaped_field_name<'a>(&self, input: &'a str) -> IResult<&'a str, String> {
+        escaped_transform(none_of("\\\"^~()[]{}:*"), '\\', |input| {
+            self.escapable_transform(input)
+        })(input)
+    }
+
+    fn phrase_inner<'a>(&self, input: &'a str) -> IResult<&'a str, &'a str> {
+        delimited(
+            char('"'),
+            |input| self.escaped_with_spaces(input),
+            char('"'),
+        )(input)
+    }
+
+    fn regex<'a>(&self, input: &'a str) -> IResult<&'a str, Query<'a>> {
+        let (input, regex) = delimited(char('/'), take_until("/"), char('/'))(input)?;
+        Ok((input, Regex::new(regex).into()))
+    }
+
+    fn take_till_reserved_word<'a>(&self, input: &'a str) -> IResult<&'a str, &'a str> {
+        // NOTE: this should only be run on unquoted phrases. Does not handle escaped chars
+        let indexes = &[
+            input.find(" AND "),
+            input.find(" OR "),
+            input.find(" NOT "),
+            input.find("&&"),
+            input.find("||"),
+            input.find("!"),
+            input.find(" WITHIN "),
+            input.find(" ADJ "),
+            input.find("("),
+        ];
+        let min = match indexes.iter().filter_map(Option::as_ref).min() {
+            Some(min) => *min,
+            None => {
+                return Err(nom::Err::Error(nom::error::make_error(
+                    input,
+                    nom::error::ErrorKind::Tag,
+                )))
+            }
+        };
+        let (matched, remaining) = input.split_at(min);
+        Ok((remaining, matched))
+    }
+
+    // TODO: refactor the common parts of `adjacent` and `within` into a single parser
+    fn within<'a>(&self, input: &'a str) -> IResult<&'a str, Query<'a>> {
+        let (input, _) = self.eat_whitespace(input)?;
+        trace!("attepmt within: {:?}", input);
+        // TODO: handle multiple spaces around `WITHIN`
+        let (input, phrase, distance) = match input.chars().next() {
+            Some('"') => {
+                // quoted phrase
+                let (input, (phrase, distance)) = separated_pair(
+                    |input| self.phrase_inner(input),
+                    alt((tag(" WITHIN "), tag("~"))),
+                    map_res(digit1, |s: &str| s.parse::<u64>()),
+                )(input)?;
+                (input, phrase, distance)
+            }
+            _ => {
+                // unquoted phrase - only supports WITHIN, not ~
+                let (input, phrase) = self.take_till_reserved_word(input)?;
+                let (input, distance) =
+                    preceded(tag(" WITHIN "), map_res(digit1, |s: &str| s.parse::<u64>()))(input)?;
+                trace!("got within: {:?} {:?}", input, distance);
+                (input, phrase, distance)
+            }
+        };
+
+        Ok((input, Query::near(phrase, distance, false)))
+    }
+
+    // TODO: refactor the common parts of `adjacent` and `within` into a single parser
+    fn adjacent<'a>(&self, input: &'a str) -> IResult<&'a str, Query<'a>> {
+        let (input, _) = self.eat_whitespace(input)?;
+        trace!("attempt adjacent: {:?}", input);
+        // TODO: handle multiple spaces around `ADJ`
+        let (input, phrase, distance) = match input.chars().next() {
+            Some('"') => {
+                // quoted phrase
+                let (input, (phrase, distance)) = separated_pair(
+                    |input| self.phrase_inner(input),
+                    tag(" ADJ "),
+                    map_res(digit1, |s: &str| s.parse::<u64>()),
+                )(input)?;
+                (input, phrase, distance)
+            }
+            _ => {
+                // unquoted phrase
+                let (input, phrase) = self.take_till_reserved_word(input)?;
+                let (input, distance) =
+                    preceded(tag(" ADJ "), map_res(digit1, |s: &str| s.parse::<u64>()))(input)?;
+                trace!("got adjacent: {:?} {:?}", input, distance);
+                (input, phrase, distance)
+            }
+        };
+        Ok((input, Query::near(phrase, distance, true)))
+    }
+
+    fn phrase<'a>(&self, input: &'a str) -> IResult<&'a str, Phrase<'a>> {
+        map(|input| self.phrase_inner(input), |s| Phrase::new(s))(input)
+    }
+
+    fn term<'a>(&self, input: &'a str) -> IResult<&'a str, Term<'a>> {
+        let (input, _) = self.eat_whitespace(input)?;
+        let (input, word) = self.escaped_without_spaces(input)?;
+        let (input, maybe_boost) = self.boost(input)?;
+        let (input, fuzziness) = self.fuzziness(input)?;
+        let (input, boost) = match maybe_boost {
+            Some(boost) => (input, Some(boost)),
+            None => self.boost(input)?,
+        };
+        Ok((input, {
+            let mut term = Term::new(word);
+            if let Some(boost) = boost {
+                term = term.set_boost(boost);
+            }
+            if let Some(fuzziness) = fuzziness {
+                term = term.set_fuzziness(fuzziness);
+            }
+            term
+        }))
+    }
+
+    fn group<'a>(&self, input: &'a str) -> IResult<&'a str, Query<'a>> {
+        let (input, _) = self.eat_whitespace(input)?;
+        trace!("attempt group: {:?}", input);
+        let (input, query) = delimited(char('('), |input| self.parse(input), char(')'))(input)?;
+        trace!("got group input: {:?} body: {:?}", input, query);
+        Ok((input, query))
+    }
+
+    #[rustfmt::skip]
+    fn range<'a>(&self, input: &'a str) -> IResult<&'a str, Query<'a>> {
+        let (input, (from_type, _, from, _, _, _, to, _, to_type)) = tuple((
+            alt((
+                char('['),
+                char('{'),
+            )),
+            multispace0,
+            |input| self.escaped_without_spaces(input),
+            multispace0,
+            tag("TO"),
+            multispace0,
+            |input| self.escaped_without_spaces(input),
+            multispace0,
+            alt((
+                char(']'),
+                char('}'),
+            )),
+        ))(input)?;
+        trace!("range: {:?} from_type: {:?}, from: {:?}, to: {:?}, to_type: {:?}", input, from_type, from, to, to_type);
+        let query = Range::new(from, from_type == '[', to, to_type == ']').into();
+        Ok((input, query))
+    }
+
+    fn query<'a>(&self, input: &'a str) -> IResult<&'a str, Query<'a>> {
+        let (input, _) = self.eat_whitespace(input)?;
+        // attempt to parse a field:query pair
+        let result: IResult<&'a str, (String, Query)> = separated_pair(
+            |input| self.escaped_field_name(input),
+            tag(":"),
+            alt((
+                |input| self.group(input),
+                |input| self.within(input),
+                |input| self.adjacent(input),
+                |input| self.range(input),
+                map(|input| self.regex(input), From::from),
+                map(|input| self.term(input), From::from),
+                map(|input| self.phrase(input), From::from),
+            )),
+        )(input);
+        trace!("pair: {:?} {:?}", input, result);
+        match result {
+            // input was a field:query pair
+            Ok((input, (field, query))) => {
+                let query = match query {
+                    // exists is a special case where the pair is backwards
+                    Query::Term(term) if field == "_exists_" => Query::exists(term),
+                    query => query.set_field(field),
+                };
+                Ok((input, query))
+            }
+            // input wasn't a field:query pair, non-field parsing
+            Err(_) => alt((
+                |input| self.group(input),
+                |input| self.within(input),
+                |input| self.adjacent(input),
+                map(|input| self.regex(input), From::from),
+                map(|input| self.term(input), From::from),
+                map(|input| self.phrase(input), From::from),
+            ))(input),
+        }
+    }
+
+    pub fn parse<'a>(&self, input: &'a str) -> IResult<&'a str, Query<'a>> {
+        trace!("parse: {:?}", input);
+        let mut queries = vec![];
+        let mut input = input;
+        while !input.is_empty() {
+            trace!("queries: {:?}", queries);
+            let (i, _) = self.eat_whitespace(input)?;
+            let i = if let Ok((input, _)) = alt((tag::<_, _, ()>("AND "), tag::<_, _, ()>("&&")))(i)
+            {
+                trace!("got AND: {:?}", input);
+                let (input, query) = self.parse(input)?;
+                match queries.pop() {
+                    Some(Query::And(and)) => queries.push(and.push(query).into()),
+                    Some(prev_query) => match query {
+                        Query::And(and) => queries.push(and.prepend(prev_query).into()),
+                        _ => queries.push(Query::and(vec![prev_query, query])),
+                    },
+                    None => {
+                        return Err(nom::Err::Error(nom::error::make_error(
+                            input,
+                            nom::error::ErrorKind::Tag,
+                        )))
+                    }
+                }
+                input
+            } else if let Ok((input, _)) = alt((tag::<_, _, ()>("OR "), tag::<_, _, ()>("||")))(i) {
+                trace!("got OR: {:?}", input);
+                let (input, query) = self.parse(input)?;
+                match queries.pop() {
+                    // don't want to do this if the prev or was a different group
+                    Some(Query::Or(or)) => queries.push(or.push(query).into()),
+                    Some(prev_query) => match query {
+                        Query::Or(or) => queries.push(or.prepend(prev_query).into()),
+                        _ => queries.push(Query::or(vec![prev_query, query])),
+                    },
+                    None => {
+                        // TODO: return a string: "Unexpected OR, expecting query"
+                        return Err(nom::Err::Error(nom::error::make_error(
+                            input,
+                            nom::error::ErrorKind::Tag,
+                        )));
+                    }
+                }
+                input
+            } else if let Ok((input, _)) = alt((tag::<_, _, ()>("NOT "), tag::<_, _, ()>("!")))(i) {
+                trace!("got NOT: {:?}", input);
+                let (input, query) = self.query(input)?;
+                queries.push(Query::not(query));
+                input
+            } else if char::<_, ()>(')')(i).is_ok() {
+                trace!("got end of group");
+                // end of a group, return all the queries. don't advance input
+                break;
+            } else if let Ok((input, Some(boost))) = self.boost(i) {
+                trace!("input: {:?} boost: {:?}", input, boost);
+                // boost
+                match queries.pop() {
+                    Some(prev_query) => queries.push(prev_query.set_boost(boost)),
+                    None => {
+                        // TODO: return a string: "Unexpected boost, expecting query"
+                        return Err(nom::Err::Error(nom::error::make_error(
+                            input,
+                            nom::error::ErrorKind::Tag,
+                        )));
+                    }
+                }
+                input
+            } else {
+                trace!("attempt query: {:?}", i);
+                let (i, query) = self.query(i)?;
+                queries.push(query);
+                i
+            };
+            let (i, _whitespace) = multispace0(i)?;
+            input = i;
+        }
+        let query = if queries.len() == 1 {
+            let mut queries = queries;
+            queries.remove(0)
+        } else {
+            match self.config.default_operator {
+                Operator::Or => Query::or(queries),
+                Operator::And => Query::and(queries),
+            }
+        };
+        Ok((input, query))
+    }
 }
 
 #[cfg(test)]
@@ -369,6 +410,10 @@ mod tests {
     use std::sync::Once;
 
     static INIT: Once = Once::new();
+
+    fn parse(input: &str) -> IResult<&str, Query> {
+        Parser::default().parse(input)
+    }
 
     fn setup() {
         INIT.call_once(|| {
@@ -400,7 +445,7 @@ mod tests {
             let actual = parse("#word");
             assert_eq!(expected, actual);
             let expected = Ok((" eggs", Term::new("#word")));
-            let actual = term("#word eggs");
+            let actual = Parser::default().term("#word eggs");
             assert_eq!(expected, actual);
         })
     }
